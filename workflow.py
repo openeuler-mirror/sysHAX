@@ -114,9 +114,8 @@ class AdaptiveDecoder:
             try:
                 # 调用调度决策器获取下一步解码信息，调度器返回一个元组：
                 # tuple[0]为device_type，None为繁忙；
-                # tuple[1]为token_limit，None为不限制直到达到max_tokens。
-                # 由于调度器未实现，暂时返回 ("GPU", None) 默认使用GPU进行解码
-                device_type, token_limit = ("GPU", None)
+                # tuple[1]为token_limit，0为不限制直到达到max_tokens。
+                device_type, token_limit = await self.scheduling_decider.make_scheduling_decision()
                 
                 if device_type is None:
                     log.warning("系统负载过高，终止解码")
@@ -124,9 +123,10 @@ class AdaptiveDecoder:
                 
                 # 处理token限制
                 remaining_tokens = max(1, max_tokens - total_tokens_generated)
-                if token_limit is not None:
+                if token_limit > 0:
                     token_limit = min(token_limit, remaining_tokens)
                 else:
+                    # token_limit为0时，使用剩余token数作为限制
                     token_limit = remaining_tokens
                 
                 log.info(f"调度决策：使用{device_type}解码，token限制={token_limit}")
@@ -201,7 +201,8 @@ class AdaptiveDecoder:
         service_type = "GPU"
         service_url = self.prefill_url
         
-        if token_limit is not None:
+        # 处理token限制: token_limit为0或None时不限制
+        if token_limit is not None and token_limit > 0:
             original_max_tokens = decode_data.get("max_tokens", 100)
             # 临时修改max_tokens
             decode_data["max_tokens"] = min(original_max_tokens, token_limit)
@@ -217,7 +218,8 @@ class AdaptiveDecoder:
         service_type = "CPU"
         service_url = self.decode_url
         
-        if token_limit is not None:
+        # 处理token限制: token_limit为0或None时不限制
+        if token_limit is not None and token_limit > 0:
             original_max_tokens = decode_data.get("max_tokens", 100)
             # 临时修改max_tokens
             decode_data["max_tokens"] = min(original_max_tokens, token_limit)
@@ -285,7 +287,7 @@ class AdaptiveDecoder:
         Args:
             current_decode_data: 当前解码数据
             device_type: 设备类型，如"GPU"或"CPU"
-            token_limit: 最大允许的token数量
+            token_limit: 最大允许的token数量，0表示不限制
             
         Returns:
             Dict: 包含解码结果和步骤信息的字典
