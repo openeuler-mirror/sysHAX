@@ -5,6 +5,8 @@ import copy
 
 from config import PREFILL_URL, DECODE_URL
 from logger import Logger
+from monitor import SystemMonitor
+from decider import SchedulingDecider
 
 # 使用自定义日志管理器
 log = Logger
@@ -14,8 +16,8 @@ class AdaptiveDecoder:
     
     def __init__(self, system_monitor, scheduling_decider):
         """初始化自适应解码器"""
-        self.system_monitor = system_monitor
-        self.scheduling_decider = scheduling_decider
+        self.system_monitor: SystemMonitor = system_monitor
+        self.scheduling_decider: SchedulingDecider = scheduling_decider
         self.prefill_url = PREFILL_URL
         self.decode_url = DECODE_URL
     

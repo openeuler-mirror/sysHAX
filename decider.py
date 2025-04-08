@@ -21,7 +21,7 @@ class SchedulingDecider:
         Args:
             system_monitor: 系统监控器实例
         """
-        self.system_monitor = system_monitor
+        self.system_monitor: SystemMonitor = system_monitor
         
         # 从配置中加载默认参数
         # 调度阈值配置
