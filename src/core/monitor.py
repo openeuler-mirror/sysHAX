@@ -28,7 +28,6 @@ RE_PREFILL_TOKENS = re.compile(r'vllm:prompt_tokens_total{[^}]*}\s+([\d.]+)')
 # Decode Token总数 - 浮点值，表示解码的token累计总数（用于计算吞吐量）
 RE_DECODE_TOKENS = re.compile(r'vllm:generation_tokens_total{[^}]*}\s+([\d.]+)')
 
-
 class ResourceMonitor:
     """资源监控类，解析单个vLLM服务的Prometheus指标
     
