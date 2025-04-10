@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2024-2025. All rights reserved.
+
 import httpx
 import json
 import time
@@ -5,11 +7,11 @@ from typing import Optional, Dict
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse
 
-from workflow import AdaptiveDecoder
-from monitor import SystemMonitor
-from decider import SchedulingDecider
-from benchmark import PerformanceTester
-from logger import Logger
+from src.workflow import AdaptiveDecoder
+from core.monitor import SystemMonitor
+from core.decider import SchedulingDecider
+from core.benchmark import PerformanceTester
+from utils.logger import Logger
 
 log = Logger
 

@@ -1,12 +1,14 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2024-2025. All rights reserved.
+
 import httpx
 from typing import Dict, List, Tuple, Optional
 import time
 import copy
 
-from config import PREFILL_URL, DECODE_URL
-from logger import Logger
-from monitor import SystemMonitor
-from decider import SchedulingDecider
+from utils.config import PREFILL_URL, DECODE_URL
+from utils.logger import Logger
+from core.monitor import SystemMonitor
+from core.decider import SchedulingDecider
 
 # 使用自定义日志管理器
 log = Logger

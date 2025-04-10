@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2024-2025. All rights reserved.
+
 import os
 from typing import Optional
 from contextlib import asynccontextmanager
@@ -6,13 +8,13 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from config import GPU_METRICS_URL, CPU_METRICS_URL, DEFAULT_SCHEDULING_PARAMS
-from monitor import SystemMonitor
-from decider import SchedulingDecider
-from benchmark import PerformanceTester
-from workflow import AdaptiveDecoder
-from logger import Logger
-import routes
+from src.utils.config import GPU_METRICS_URL, CPU_METRICS_URL, DEFAULT_SCHEDULING_PARAMS
+from src.core.monitor import SystemMonitor
+from src.core.decider import SchedulingDecider
+from src.core.benchmark import PerformanceTester
+from src.workflow import AdaptiveDecoder
+from src.utils.logger import Logger
+import src.routes as routes
 
 log = Logger
 

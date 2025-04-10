@@ -1,8 +1,12 @@
+"""调度决策模块
+
+# Copyright (c) Huawei Technologies Co., Ltd. 2024-2025. All rights reserved.
+"""
 from typing import Dict, Tuple
 
-from monitor import SystemMonitor
-from config import DEFAULT_SCHEDULING_PARAMS
-from logger import Logger
+from core.monitor import SystemMonitor
+from utils.config import DEFAULT_SCHEDULING_PARAMS
+from utils.logger import Logger
 
 log = Logger
 

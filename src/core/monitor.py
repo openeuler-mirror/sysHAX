@@ -1,10 +1,14 @@
+"""资源监控模块
+
+# Copyright (c) Huawei Technologies Co., Ltd. 2024-2025. All rights reserved.
+"""
 import httpx
 import re
 import time
 from typing import Dict, Tuple
 
-from config import GPU_METRICS_URL, CPU_METRICS_URL
-from logger import Logger
+from utils.config import GPU_METRICS_URL, CPU_METRICS_URL
+from utils.logger import Logger
 
 log = Logger
 

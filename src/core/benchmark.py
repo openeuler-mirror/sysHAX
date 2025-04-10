@@ -1,11 +1,15 @@
+"""基准测试模块
+
+# Copyright (c) Huawei Technologies Co., Ltd. 2024-2025. All rights reserved.
+"""
 import asyncio
 from typing import Dict, Tuple, Optional
 import time
 
-from config import PREFILL_URL, DECODE_URL, GPU_METRICS_URL, CPU_METRICS_URL, ServicePerformance
-from monitor import SystemMonitor
-from workflow import AdaptiveDecoder
-from logger import Logger
+from utils.config import PREFILL_URL, DECODE_URL, GPU_METRICS_URL, CPU_METRICS_URL, ServicePerformance
+from core.monitor import SystemMonitor
+from src.workflow import AdaptiveDecoder
+from utils.logger import Logger
 
 log = Logger
 
@@ -57,7 +61,7 @@ class PerformanceTester:
         try:
             # 如果没有设置adaptive_decoder，则创建临时调度决策器
             if self.adaptive_decoder is None:
-                from decider import SchedulingDecider
+                from core.decider import SchedulingDecider
                 temp_decider = SchedulingDecider(system_monitor=self.system_monitor)
                 self.adaptive_decoder = AdaptiveDecoder(
                     system_monitor=self.system_monitor,
