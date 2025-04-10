@@ -1,4 +1,4 @@
-# Copyright (c) Huawei Technologies Co., Ltd. 2024-2025. All rights reserved.
+# Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 
 import httpx
 from typing import Dict, List, Tuple, Optional
@@ -116,10 +116,12 @@ class AdaptiveDecoder:
             log.info(f"---------- 解码步骤 {step_count} 开始 ----------")
             
             try:
-                # 调用调度决策器获取下一步解码信息，调度器返回一个元组：
-                # tuple[0]为device_type，None为繁忙；
-                # tuple[1]为token_limit，0为不限制直到达到max_tokens。
-                device_type, token_limit = await self.scheduling_decider.make_scheduling_decision()
+                # 调用调度决策器获取下一步解码信息，调度器返回一个字典：
+                # device: 设备类型，None为繁忙
+                # token_limit: token限制，0为不限制直到达到max_tokens
+                decision = await self.scheduling_decider.make_scheduling_decision()
+                device_type = decision["device"]
+                token_limit = decision["token_limit"]
                 
                 if device_type is None:
                     log.warning("系统负载过高，终止解码")
