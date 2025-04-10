@@ -1,4 +1,4 @@
-# Copyright (c) Huawei Technologies Co., Ltd. 2024-2025. All rights reserved.
+# Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 
 import os
 from typing import Optional
@@ -8,7 +8,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.utils.config import GPU_METRICS_URL, CPU_METRICS_URL, DEFAULT_SCHEDULING_PARAMS
+from src.utils.config import GPU_METRICS_URL, CPU_METRICS_URL
 from src.core.monitor import SystemMonitor
 from src.core.decider import SchedulingDecider
 from src.core.benchmark import PerformanceTester
@@ -78,37 +78,18 @@ async def lifespan(app: FastAPI):
     routes.performance_tester = performance_tester_instance
     routes.adaptive_decoder = adaptive_decoder_instance
     
-    # 检查是否跳过基准测试（仅通过环境变量设置）
-    skip_benchmark = os.environ.get("SKIP_BENCHMARK", "").lower() in ("1", "true", "yes")
-    
-    if skip_benchmark:
-        log.info("SKIP_BENCHMARK设置，跳过基准测试")
-        # 使用默认配置
-        scheduling_decider_instance.update_parameters(
-            system_busy_threshold=DEFAULT_SCHEDULING_PARAMS["system_busy_threshold"]
-        )
     # 执行性能基准测试
-    elif performance_tester_instance is not None:
-        log.info("开始执行性能基准测试...")
-        try:
-            # 执行测试，直接调用异步方法
-            await performance_tester_instance.run_benchmarks()
-            
-            # 获取性能测试结果摘要
-            performance_summary = performance_tester_instance.get_performance_summary()
-            log.info(f"性能测试完成，性能比: {performance_summary.get('performance_ratio', 0):.2f}x")
-            
-        except Exception as e:
-            error_msg = f"性能测试失败: {str(e)}"
-            log.error(error_msg)
-            import traceback
-            traceback.print_exc()  # 打印详细堆栈跟踪
-            
-            
-        # 确保调度参数正确配置
-        scheduling_decider_instance.update_parameters(
-            system_busy_threshold=DEFAULT_SCHEDULING_PARAMS["system_busy_threshold"]
-        )
+    log.info("开始执行性能基准测试...")
+    try:
+        # 执行测试
+        await performance_tester_instance.run_benchmarks()
+        
+        # 获取性能测试结果摘要
+        performance_summary = performance_tester_instance.get_performance_summary()
+        log.info(f"性能测试完成，性能比: {performance_summary.get('performance_ratio', 0):.2f}x")
+        
+    except Exception as e:
+        log.error(f"性能测试失败: {str(e)}", exc_info=True)
     
     log.info("应用启动完成，API接口已就绪")
     yield  # 应用运行中
@@ -133,7 +114,7 @@ app.include_router(routes.router)
 
 def run():
     """主程序入口"""
-    # 启动FastAPI应用，不使用热重载功能
+    # 启动FastAPI应用
     uvicorn.run(
         "main:app", 
         host="0.0.0.0", 
