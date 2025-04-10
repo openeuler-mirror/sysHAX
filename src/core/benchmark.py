@@ -1,16 +1,18 @@
 """基准测试模块
 
-# Copyright (c) Huawei Technologies Co., Ltd. 2024-2025. All rights reserved.
+# Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 """
 import asyncio
 from typing import Dict, Tuple, Optional
 import time
 
 from src.workflow import AdaptiveDecoder
-from src.core.decider import SchedulingDecider
 from src.core.monitor import SystemMonitor
+from src.core.decider import SchedulingDecider
 from src.utils.logger import Logger
-from src.utils.config import PREFILL_URL, DECODE_URL, GPU_METRICS_URL, CPU_METRICS_URL, ServicePerformance
+from src.utils.config import ServicePerformance
+from src.utils.config import PREFILL_URL, DECODE_URL, GPU_METRICS_URL, CPU_METRICS_URL
+from src.utils.config import DEFAULT_TEST_PROMPT, DEFAULT_TEST_TOKENS, DEFAULT_MODEL
 
 log = Logger
 
@@ -27,9 +29,10 @@ class PerformanceTester:
         # 创建自适应解码器，用于性能测试
         self.adaptive_decoder = None
         
-        # 测试参数
-        self.test_prompt = "这是一个标准测试语句。"  # 更新测试提示
-        self.test_tokens = 20   # 减少生成的token数量，缩短测试时间
+        # 测试参数 - 从配置中获取
+        self.test_prompt = DEFAULT_TEST_PROMPT
+        self.test_tokens = DEFAULT_TEST_TOKENS
+        self.model_name = DEFAULT_MODEL
         
         # 性能测试结果
         self.gpu_performance = None
@@ -115,10 +118,10 @@ class PerformanceTester:
             
             # 在GPU上执行prefill
             prefill_data = {
-                "model": "ds1.5b",
+                "model": self.model_name,
                 "prompt": prompt,
                 "max_tokens": 2,
-                "temperature": 0,
+                "temperature": 0,  # 基准测试固定使用temperature=0
                 "prefill_then_swapout": True
             }
             log.info(f"执行prefill请求，prompt长度={len(prompt)}")
@@ -130,15 +133,15 @@ class PerformanceTester:
             
             # 准备decode数据
             decode_data = {
-                "model": "ds1.5b",
+                "model": self.model_name,
                 "prompt": prompt,
                 "max_tokens": self.test_tokens,
-                "temperature": 0,
+                "temperature": 0,  # 基准测试固定使用temperature=0
                 "continue_decoding": f"{completion_id}-0",
                 "active_token": active_token
             }
             
-            log.info(f"准备好decode数据，max_tokens={self.test_tokens}")
+            log.info(f"准备好decode数据，model={self.model_name}, max_tokens={self.test_tokens}")
             
             return decode_data
         except Exception as e:
@@ -332,8 +335,8 @@ class PerformanceTester:
             cpu_throughput: CPU服务吞吐量(tokens/秒)
         """
         # 保存性能测试结果
-        self.gpu_performance = ServicePerformance(gpu_latency, gpu_throughput, 1.0)
-        self.cpu_performance = ServicePerformance(cpu_latency, cpu_throughput, 1.0)
+        self.gpu_performance = ServicePerformance(gpu_latency, gpu_throughput)
+        self.cpu_performance = ServicePerformance(cpu_latency, cpu_throughput)
         
         # 计算性能比率
         if self.cpu_performance.throughput > 0:
