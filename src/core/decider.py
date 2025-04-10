@@ -1,6 +1,6 @@
 """调度决策模块
 
-# Copyright (c) Huawei Technologies Co., Ltd. 2024-2025. All rights reserved.
+# Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 """
 from typing import Dict
 
@@ -29,7 +29,7 @@ class SchedulingDecider:
         """做出调度决策，返回设备类型和token限制
         
         Returns:
-            result: {
+            decision: {
                 "device": 设备类型,None表示系统繁忙
                 "token_limit": token限制,0表示不限制
             }
@@ -37,5 +37,5 @@ class SchedulingDecider:
         # 更新系统指标
         await self.system_monitor.update_metrics()
         
-        result = {"device": "GPU", "token_limit": 0}
-        return result
+        decision = {"device": "GPU", "token_limit": 0}
+        return decision
