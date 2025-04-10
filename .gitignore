@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 *.so
 .Python
+env/
 build/
 develop-eggs/
 dist/
@@ -22,50 +23,38 @@ wheels/
 
 # 虚拟环境
 venv/
-env/
-ENV/
 .env
 .venv
-env.bak/
-venv.bak/
+env/
 
-# 日志文件
-logs/
-*.log
-
-# 单元测试/覆盖率报告
-htmlcov/
-.tox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-.hypothesis/
-tests/
-
-# 临时文件
-.tmp/
-.temp/
-
-# IDE相关
+# IDE配置
 .idea/
 .vscode/
-*.swp
-*.swo
-.DS_Store
-.project
-.pydevproject
-.settings/
+*.sublime-workspace
+*.sublime-project
 
-# 项目特定
-*.sqlite3
+# 日志和数据文件
+logs/
+*.log
+*.csv
+*.dat
+*.out
+*.pid
+*.seed
 *.db
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+*.sqlite
+*.sqlite3
+
+# 测试文件
+test*/
+
+# 配置文件
+config/config.yaml
+.env
+
+# 系统文件
+.DS_Store
+Thumbs.db
 
 # 应用特定临时文件
 benchmark_results/
