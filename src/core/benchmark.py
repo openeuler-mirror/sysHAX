@@ -7,6 +7,7 @@ from typing import Dict, Tuple, Optional
 import time
 
 from src.workflow import AdaptiveDecoder
+from src.core.decider import SchedulingDecider
 from src.core.monitor import SystemMonitor
 from src.utils.logger import Logger
 from src.utils.config import PREFILL_URL, DECODE_URL, GPU_METRICS_URL, CPU_METRICS_URL, ServicePerformance
@@ -35,13 +36,6 @@ class PerformanceTester:
         self.cpu_performance = None
         # 性能比率 (GPU/CPU)
         self.performance_ratio = 1.0
-        # 动态调度参数
-        self.load_thresholds = {
-            "high": 0.8,   # 高负载阈值
-            "medium": 0.6, # 中等负载阈值
-            "low": 0.4     # 低负载阈值
-        }
-        self.gpu_preference_weight = 0.7  # GPU偏好度在决策中的权重
     
     def set_adaptive_decoder(self, decoder: AdaptiveDecoder):
         """设置自适应解码器实例
@@ -61,7 +55,6 @@ class PerformanceTester:
         try:
             # 如果没有设置adaptive_decoder，则创建临时调度决策器
             if self.adaptive_decoder is None:
-                from core.decider import SchedulingDecider
                 temp_decider = SchedulingDecider(system_monitor=self.system_monitor)
                 self.adaptive_decoder = AdaptiveDecoder(
                     system_monitor=self.system_monitor,
@@ -100,19 +93,13 @@ class PerformanceTester:
             
             result_msg = f"测试结果: \n" + \
                 f"GPU延迟={gpu_latency:.2f}ms, GPU吞吐量={final_gpu_throughput:.2f}tokens/s\n" + \
-                f"CPU延迟={cpu_latency:.2f}ms, CPU吞吐量={final_cpu_throughput:.2f}tokens/s"
+                f"CPU延迟={cpu_latency:.2f}ms, CPU吞吐量={final_cpu_throughput:.2f}tokens/s\n" + \
+                f"GPU/CPU性能比={self.performance_ratio:.2f}x"
             
             log.info(result_msg)
             
-            # 5. 动态调整调度参数
-            self._adjust_scheduling_parameters()
-            # 记录测试结果
-
-            
         except Exception as e:
             log.error(f"基准测试失败: {str(e)}", exc_info=True)
-            # 使用默认参数
-            log.info("使用默认调度参数") 
     
     async def _prepare_test_data(self, prompt: str) -> Dict:
         """准备测试数据，在GPU上执行prefill
@@ -132,11 +119,10 @@ class PerformanceTester:
                 "prompt": prompt,
                 "max_tokens": 2,
                 "temperature": 0,
-                "prefill_then_swapout": True  # 修改为True，与用户代码一致
+                "prefill_then_swapout": True
             }
             log.info(f"执行prefill请求，prompt长度={len(prompt)}")
 
-            # 使用adaptive_decoder.prefill_request而不是独立函数
             prefill_result = await self.adaptive_decoder.prefill_request(prefill_data)
             completion_id = prefill_result["completion_id"]
             active_token = prefill_result["active_token"]
@@ -338,7 +324,6 @@ class PerformanceTester:
            (取两个比率的平均值，综合考虑速度和响应时间)
         
         比率越高，表示GPU相对于CPU的性能优势越大。
-        这个比率会影响调度决策中的阈值和权重设置。
         
         Args:
             gpu_latency: GPU服务延迟(毫秒)
@@ -361,33 +346,6 @@ class PerformanceTester:
             self.performance_ratio = 10.0  # 默认值
             log.info(f"使用默认性能比率: {self.performance_ratio}")
     
-    def _adjust_scheduling_parameters(self):
-        """根据测试结果调整调度参数"""
-        # 性能比率越高，越倾向于使用GPU
-        if self.performance_ratio > 15:
-            # GPU非常快，提高阈值使更多请求使用GPU
-            self.load_thresholds = {"high": 0.9, "medium": 0.7, "low": 0.5}
-            self.gpu_preference_weight = 0.8
-        elif self.performance_ratio > 10:
-            # GPU明显更快
-            self.load_thresholds = {"high": 0.85, "medium": 0.65, "low": 0.45}
-            self.gpu_preference_weight = 0.75
-        elif self.performance_ratio > 5:
-            # GPU较快 - 使用默认设置
-            pass
-        elif self.performance_ratio > 2:
-            # GPU略快
-            self.load_thresholds = {"high": 0.75, "medium": 0.55, "low": 0.35}
-            self.gpu_preference_weight = 0.6
-        else:
-            # GPU和CPU性能接近
-            self.load_thresholds = {"high": 0.7, "medium": 0.5, "low": 0.3}
-            self.gpu_preference_weight = 0.5
-    
-    def get_scheduling_parameters(self) -> Tuple[Dict[str, float], float]:
-        """获取调度参数"""
-        return self.load_thresholds, self.gpu_preference_weight
-    
     def get_performance_summary(self) -> Dict:
         """获取性能测试结果摘要"""
         if not self.gpu_performance or not self.cpu_performance:
@@ -396,17 +354,11 @@ class PerformanceTester:
         return {
             "gpu": {
                 "latency_ms": self.gpu_performance.avg_latency,
-                "throughput": self.gpu_performance.throughput,
-                "success_rate": self.gpu_performance.success_rate
+                "throughput": self.gpu_performance.throughput
             },
             "cpu": {
                 "latency_ms": self.cpu_performance.avg_latency,
-                "throughput": self.cpu_performance.throughput,
-                "success_rate": self.cpu_performance.success_rate
+                "throughput": self.cpu_performance.throughput
             },
-            "performance_ratio": self.performance_ratio,
-            "scheduling_parameters": {
-                "load_thresholds": self.load_thresholds,
-                "gpu_preference_weight": self.gpu_preference_weight
-            }
+            "performance_ratio": self.performance_ratio
         }
