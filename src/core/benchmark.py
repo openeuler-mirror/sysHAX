@@ -6,10 +6,10 @@ import asyncio
 from typing import Dict, Tuple, Optional
 import time
 
-from utils.config import PREFILL_URL, DECODE_URL, GPU_METRICS_URL, CPU_METRICS_URL, ServicePerformance
-from core.monitor import SystemMonitor
 from src.workflow import AdaptiveDecoder
-from utils.logger import Logger
+from src.core.monitor import SystemMonitor
+from src.utils.logger import Logger
+from src.utils.config import PREFILL_URL, DECODE_URL, GPU_METRICS_URL, CPU_METRICS_URL, ServicePerformance
 
 log = Logger
 

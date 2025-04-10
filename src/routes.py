@@ -8,10 +8,10 @@ from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse
 
 from src.workflow import AdaptiveDecoder
-from core.monitor import SystemMonitor
-from core.decider import SchedulingDecider
-from core.benchmark import PerformanceTester
-from utils.logger import Logger
+from src.core.monitor import SystemMonitor
+from src.core.decider import SchedulingDecider
+from src.core.benchmark import PerformanceTester
+from src.utils.logger import Logger
 
 log = Logger
 

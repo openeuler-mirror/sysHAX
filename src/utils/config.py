@@ -5,10 +5,10 @@ from pydantic import BaseModel
 from typing import Optional, Dict
 
 # 服务URL配置
-PREFILL_URL = "http://172.168.178.64:7004/v1/completions"  # GPU服务
-DECODE_URL = "http://172.168.178.64:7005/v1/completions"   # CPU服务
-GPU_METRICS_URL = "http://172.168.178.64:7004/metrics"     # GPU服务指标
-CPU_METRICS_URL = "http://172.168.178.64:7005/metrics"     # CPU服务指标
+PREFILL_URL = "http://localhost:7004/v1/completions"  # GPU服务
+DECODE_URL = "http://localhost:7005/v1/completions"   # CPU服务
+GPU_METRICS_URL = "http://localhost:7004/metrics"     # GPU服务指标
+CPU_METRICS_URL = "http://localhost:7005/metrics"     # CPU服务指标
 
 # 请求队列配置
 MAX_QUEUE_SIZE = 100

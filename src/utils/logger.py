@@ -5,9 +5,9 @@ import os
 import logging
 import gzip
 import shutil
-from datetime import datetime, timedelta
 import inspect
 import threading
+from datetime import datetime, timedelta
 
 def archive_logs(base_log_path, max_days=7):
     """归档旧的日志文件，转换为gzip格式以节省空间"""

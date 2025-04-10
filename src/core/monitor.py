@@ -7,8 +7,8 @@ import re
 import time
 from typing import Dict, Tuple
 
-from utils.config import GPU_METRICS_URL, CPU_METRICS_URL
-from utils.logger import Logger
+from src.utils.config import GPU_METRICS_URL, CPU_METRICS_URL
+from src.utils.logger import Logger
 
 log = Logger
 

@@ -4,9 +4,9 @@
 """
 from typing import Dict, Tuple
 
-from core.monitor import SystemMonitor
-from utils.config import DEFAULT_SCHEDULING_PARAMS
-from utils.logger import Logger
+from src.core.monitor import SystemMonitor
+from src.utils.config import DEFAULT_SCHEDULING_PARAMS
+from src.utils.logger import Logger
 
 log = Logger
 
