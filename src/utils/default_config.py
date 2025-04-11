@@ -1,9 +1,8 @@
-# Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
-
-"""
-默认配置值模块
+"""默认配置值模块
 包含系统所有可配置项的默认值，作为配置的基础
 这些是开发环境的安全默认值，生产环境应通过config.yaml或环境变量覆盖
+
+# Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 """
 
 # 默认配置字典
