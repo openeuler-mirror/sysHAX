@@ -7,8 +7,7 @@ import os
 import yaml
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Dict, Optional, Any
-from pydantic import BaseModel
+from typing import Dict, Any
 
 from .default_config import DEFAULT_CONFIG
 
@@ -100,42 +99,3 @@ class ServicePerformance:
     """
     avg_latency: float  # 平均延迟，单位毫秒
     throughput: float   # 吞吐量，单位tokens/s
-
-@dataclass
-class RequestState:
-    """请求状态数据类
-    
-    用于在系统内部跟踪和管理请求的生命周期。
-    使用标准库的@dataclass装饰器，而不是Pydantic的BaseModel，因为：
-    1. 这是内部使用的数据结构，不需要输入验证
-    2. dataclass更轻量高效，适合频繁创建和修改的内部状态对象
-    3. 系统内部数据类型已知，不需要Pydantic的验证和转换功能
-    """
-    request_id: str          # 请求唯一标识符
-    prompt: str              # 用户输入的提示文本
-    max_tokens: int          # 最大生成token数
-    temperature: float       # 生成随机性参数
-    created_at: float        # 创建时间戳
-    status: str              # 状态: pending, processing, completed, failed
-    assigned_service: Optional[str] = None  # 分配的服务: gpu, cpu, or None
-    response: Optional[Dict] = None         # 完成后的响应数据
-    error: Optional[str] = None             # 如果失败，存储错误信息
-
-class CompletionRequest(BaseModel):
-    """完成请求模型
-    
-    用于API接收和验证用户的文本生成请求。
-    继承自Pydantic的BaseModel，提供以下功能：
-    1. 自动数据验证和类型转换
-    2. 默认值处理
-    3. 与FastAPI集成，用于请求验证和API文档生成
-    4. 数据序列化与反序列化
-    """
-    model: str = DEFAULT_MODEL               # 使用的模型名称
-    prompt: str                              # 输入提示文本
-    max_tokens: int = DEFAULT_MAX_TOKENS     # 生成的最大token数
-    temperature: float = DEFAULT_TEMPERATURE # 控制生成随机性
-    request_id: Optional[str] = None         # 可选的请求ID
-    prefill_then_swapout: bool = False       # 是否在prefill后立即交换出
-    continue_decoding: Optional[str] = None  # 继续解码的指示
-    active_token: Optional[int] = None       # 继续解码时的活动token位置

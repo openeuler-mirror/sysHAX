@@ -214,7 +214,7 @@ async def get_metrics():
                 "decode_throughput": f"{cpu_metrics['decode_throughput']:.2f} tokens/s"
             },
             "system": {
-                "last_update": system_monitor.last_update_time.strftime("%Y-%m-%d %H:%M:%S")
+                "last_update": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(system_monitor.last_update_time))
             }
         },
         # 设置缩进使JSON输出格式化
