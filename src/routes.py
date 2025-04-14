@@ -202,16 +202,16 @@ async def get_metrics():
                 "num_running": gpu_metrics['num_running'],
                 "num_waiting": gpu_metrics['num_waiting'],
                 "num_swapped": gpu_metrics['num_swapped'],
-                "prefill_throughput": f"{gpu_metrics['prefill_throughput']:.2f} tokens/s",
-                "decode_throughput": f"{gpu_metrics['decode_throughput']:.2f} tokens/s"
+                "prompt_throughput": f"{gpu_metrics['prompt_throughput']:.2f} tokens/s",
+                "generation_throughput": f"{gpu_metrics['generation_throughput']:.2f} tokens/s"
             },
             "cpu": {
                 "cache_usage": f"{cpu_metrics['cpu_cache_usage']:.2f}",
                 "num_running": cpu_metrics['num_running'],
                 "num_waiting": cpu_metrics['num_waiting'],
                 "num_swapped": cpu_metrics['num_swapped'],
-                "prefill_throughput": f"{cpu_metrics['prefill_throughput']:.2f} tokens/s", 
-                "decode_throughput": f"{cpu_metrics['decode_throughput']:.2f} tokens/s"
+                "prompt_throughput": f"{cpu_metrics['prompt_throughput']:.2f} tokens/s", 
+                "generation_throughput": f"{cpu_metrics['generation_throughput']:.2f} tokens/s"
             },
             "system": {
                 "last_update": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(system_monitor.last_update_time))
