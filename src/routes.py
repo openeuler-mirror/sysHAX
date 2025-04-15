@@ -3,25 +3,15 @@
 import httpx
 import json
 import time
-from typing import Optional, Dict
+from typing import Dict
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse
 
-from src.workflow import AdaptiveDecoder
-from src.core.monitor import SystemMonitor
-from src.core.decider import SchedulingDecider
-from src.core.benchmark import PerformanceTester
 from src.utils.logger import Logger
-
-# 全局变量引用 - 这些变量会在应用启动时由main.py注入
-system_monitor: Optional[SystemMonitor] = None  # 系统监控器实例
-scheduling_decider: Optional[SchedulingDecider] = None  # 调度决策器实例
-performance_tester: Optional[PerformanceTester] = None  # 性能测试器实例
-adaptive_decoder: Optional[AdaptiveDecoder] = None  # 自适应解码器实例
+from src.components import Components
 
 # 创建路由器
 router = APIRouter()
-
 
 @router.post("/v1/completions")
 async def completions(request: Request):
@@ -30,7 +20,7 @@ async def completions(request: Request):
     1. 发送prefill请求到GPU服务，设置prefill_then_swapout=True
     2. 根据资源情况和请求特征，执行自适应解码
     """
-    # 确保系统组件已初始化
+    adaptive_decoder = Components.adaptive_decoder
     if adaptive_decoder is None:
         raise HTTPException(status_code=500, detail="自适应解码器未初始化")
         
@@ -118,7 +108,7 @@ async def test_decode_sequence(request: Request):
         ]
     }
     """
-    # 确保系统组件已初始化
+    adaptive_decoder = Components.adaptive_decoder
     if adaptive_decoder is None:
         raise HTTPException(status_code=500, detail="自适应解码器未初始化")
         
@@ -180,6 +170,7 @@ async def test_decode_sequence(request: Request):
 @router.get("/metrics")
 async def get_metrics():
     """返回当前的资源指标"""
+    system_monitor = Components.monitor
     if system_monitor is None:
         raise HTTPException(status_code=500, detail="系统监控器未初始化")
         

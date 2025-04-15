@@ -7,25 +7,24 @@ from typing import Dict, Tuple, Optional
 import time
 
 from src.workflow import AdaptiveDecoder
-from src.core.monitor import SystemMonitor
 from src.core.decider import SchedulingDecider
 from src.utils.logger import Logger
 from src.utils.config import ServicePerformance
-from src.utils.config import PREFILL_URL, DECODE_URL, GPU_METRICS_URL, CPU_METRICS_URL
+from src.utils.config import PREFILL_URL, DECODE_URL
 from src.utils.config import DEFAULT_TEST_PROMPT, DEFAULT_TEST_TOKENS, DEFAULT_MODEL
 
 class PerformanceTester:
     """性能测试工具，在启动时测量GPU和CPU服务的性能"""
     
-    def __init__(self, system_monitor=None):
+    def __init__(self, system_monitor=None, decoder=None):
         self.gpu_service_url = PREFILL_URL
         self.cpu_service_url = DECODE_URL
         
-        # 使用传入的系统监控器实例，或创建一个新的
-        self.system_monitor = system_monitor or SystemMonitor(GPU_METRICS_URL, CPU_METRICS_URL)
+        # 使用传入的系统监控器实例
+        self.system_monitor = system_monitor
         
         # 创建自适应解码器，用于性能测试
-        self.adaptive_decoder = None
+        self.adaptive_decoder = decoder
         
         # 测试参数 - 从配置中获取
         self.test_prompt = DEFAULT_TEST_PROMPT
@@ -37,14 +36,6 @@ class PerformanceTester:
         self.cpu_performance = None
         # 性能比率 (GPU/CPU)
         self.performance_ratio = 1.0
-    
-    def set_adaptive_decoder(self, decoder: AdaptiveDecoder):
-        """设置自适应解码器实例
-        
-        Args:
-            decoder: 自适应解码器实例
-        """
-        self.adaptive_decoder = decoder
     
     async def run_benchmarks(self):
         """运行简单的基准测试，快速测量CPU和GPU性能差异
