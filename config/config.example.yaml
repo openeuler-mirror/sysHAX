@@ -11,6 +11,10 @@ services:
     # CPU服务地址，请替换为实际地址
     url: "http://{CPU_HOST}:{CPU_PORT}/v1/completions"
     metrics_url: "http://{CPU_HOST}:{CPU_PORT}/metrics"
+  conductor:
+    # sysHAX服务配置
+    host: {APP_HOST}
+    port: {APP_PORT}
 
 models:
   # 指定使用的模型
