@@ -3,72 +3,31 @@
 
 Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 """
-import os
 import yaml
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Dict, Any
 
-from .default_config import DEFAULT_CONFIG
-
 def load_config() -> Dict[str, Any]:
     """加载配置
-    加载顺序:
-    1. 默认配置 (default_config.py)
-    2. 配置文件 (config/config.yaml)
-    3. 环境变量 (APP_*)
+    从配置文件config/config.yaml加载
     """
-    config = DEFAULT_CONFIG.copy()
+    config = {}
     
-    # 1. 从配置文件加载
+    # 从配置文件加载
     config_path = Path(__file__).parent.parent.parent / "config" / "config.yaml"
     if config_path.exists():
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 yaml_config = yaml.safe_load(f)
                 if yaml_config:
-                    _deep_update_dict(config, yaml_config)
+                    config = yaml_config
         except Exception as e:
             print(f"加载配置文件失败: {e}")
-    
-    # 2. 从环境变量加载覆盖
-    for env_key, env_value in os.environ.items():
-        if env_key.startswith("APP_"):
-            parts = env_key[4:].lower().split("_")
-            if len(parts) < 2:
-                continue
-                
-            current = config
-            for part in parts[:-1]:
-                if part not in current:
-                    break
-                current = current[part]
-            else:
-                last_part = parts[-1]
-                if last_part in current:
-                    original_value = current[last_part]
-                    # 类型转换
-                    try:
-                        if isinstance(original_value, bool):
-                            current[last_part] = env_value.lower() in ("1", "true", "yes")
-                        elif isinstance(original_value, int):
-                            current[last_part] = int(env_value)
-                        elif isinstance(original_value, float):
-                            current[last_part] = float(env_value)
-                        else:
-                            current[last_part] = env_value
-                    except ValueError:
-                        current[last_part] = env_value
+    else:
+        raise FileNotFoundError(f"配置文件不存在: {config_path}")
     
     return config
-
-def _deep_update_dict(destination: Dict, source: Dict) -> None:
-    """深度更新字典"""
-    for key, value in source.items():
-        if isinstance(value, dict) and key in destination and isinstance(destination[key], dict):
-            _deep_update_dict(destination[key], value)
-        else:
-            destination[key] = value
 
 # 加载配置
 CONFIG = load_config()
