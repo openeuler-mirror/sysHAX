@@ -37,6 +37,8 @@ PREFILL_URL = CONFIG["services"]["gpu"]["url"]
 DECODE_URL = CONFIG["services"]["cpu"]["url"]
 GPU_METRICS_URL = CONFIG["services"]["gpu"]["metrics_url"]
 CPU_METRICS_URL = CONFIG["services"]["cpu"]["metrics_url"]
+SYSHAX_HOST = CONFIG["services"]["conductor"]["host"]
+SYSHAX_PORT = CONFIG["services"]["conductor"]["port"]
 
 # 请求队列配置
 MAX_QUEUE_SIZE = CONFIG["system"]["max_queue_size"]

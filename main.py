@@ -8,7 +8,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.utils.config import GPU_METRICS_URL, CPU_METRICS_URL
+from src.utils.config import GPU_METRICS_URL, CPU_METRICS_URL, SYSHAX_HOST, SYSHAX_PORT
 from src.core.monitor import SystemMonitor
 from src.core.decider import SchedulingDecider
 from src.core.benchmark import PerformanceTester
@@ -112,11 +112,15 @@ app.include_router(routes.router)
 
 def run():
     """主程序入口"""
+    # 从配置读取主机和端口
+    host = SYSHAX_HOST
+    port = SYSHAX_PORT
+    
     # 启动FastAPI应用
     uvicorn.run(
         "main:app", 
-        host="0.0.0.0", 
-        port=7011
+        host=host, 
+        port=port
     )
 
 if __name__ == "__main__":
