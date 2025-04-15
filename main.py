@@ -1,4 +1,4 @@
-# Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+# Copyright (c) Huawei TechnoLoggeries Co., Ltd. 2025-2025. All rights reserved.
 
 import os
 from typing import Optional
@@ -15,8 +15,6 @@ from src.core.benchmark import PerformanceTester
 from src.workflow import AdaptiveDecoder
 from src.utils.logger import Logger
 import src.routes as routes
-
-log = Logger
 
 # 全局变量
 # 系统监控器实例
@@ -45,7 +43,7 @@ async def lifespan(app: FastAPI):
     global system_monitor_instance, scheduling_decider_instance, performance_tester_instance, adaptive_decoder_instance
     
     # 确保日志目录存在
-    os.makedirs('logs', exist_ok=True)
+    os.makedirs('Loggers', exist_ok=True)
     
     # 初始化系统组件
     system_monitor_instance = SystemMonitor(
@@ -70,7 +68,7 @@ async def lifespan(app: FastAPI):
     # 设置performance_tester的自适应解码器实例
     performance_tester_instance.set_adaptive_decoder(adaptive_decoder_instance)
     
-    log.info("系统组件初始化完成")
+    Logger.info("系统组件初始化完成")
     
     # 将实例注入到routes模块
     routes.system_monitor = system_monitor_instance
@@ -79,23 +77,23 @@ async def lifespan(app: FastAPI):
     routes.adaptive_decoder = adaptive_decoder_instance
     
     # 执行性能基准测试
-    log.info("开始执行性能基准测试...")
+    Logger.info("开始执行性能基准测试...")
     try:
         # 执行测试
         await performance_tester_instance.run_benchmarks()
         
         # 获取性能测试结果摘要
         performance_summary = performance_tester_instance.get_performance_summary()
-        log.info(f"性能测试完成，性能比: {performance_summary.get('performance_ratio', 0):.2f}x")
+        Logger.info(f"性能测试完成，性能比: {performance_summary.get('performance_ratio', 0):.2f}x")
         
     except Exception as e:
-        log.error(f"性能测试失败: {str(e)}", exc_info=True)
+        Logger.error(f"性能测试失败: {str(e)}", exc_info=True)
     
-    log.info("应用启动完成，API接口已就绪")
+    Logger.info("应用启动完成，API接口已就绪")
     yield  # 应用运行中
     
     # 应用关闭时的清理操作
-    log.info("应用关闭，正在清理资源...")
+    Logger.info("应用关闭，正在清理资源...")
 
 # 创建FastAPI应用
 app = FastAPI(lifespan=lifespan)

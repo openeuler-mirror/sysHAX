@@ -1,6 +1,6 @@
 """资源监控模块
 
-# Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+# Copyright (c) Huawei TechnoLoggeries Co., Ltd. 2025-2025. All rights reserved.
 """
 import httpx
 import re
@@ -9,8 +9,6 @@ from typing import Dict, Tuple
 
 from src.utils.config import GPU_METRICS_URL, CPU_METRICS_URL
 from src.utils.logger import Logger
-
-log = Logger
 
 # Prometheus指标正则匹配模式
 # 吞吐量指标 - vLLM原生吞吐量指标，tokens/s
@@ -48,7 +46,7 @@ class ResourceMonitor:
         self.update_interval = 5.0
             
         # 配置日志信息
-        log.info(f"初始化{service_name}监控：{metrics_url}, 更新间隔={self.update_interval}秒")
+        Logger.info(f"初始化{service_name}监控：{metrics_url}, 更新间隔={self.update_interval}秒")
         
         # 指标缓存
         self.last_update_time = 0.0
@@ -103,7 +101,7 @@ class ResourceMonitor:
                 response = await client.get(self.metrics_url, timeout=3.0)
                 
                 if response.status_code != 200:
-                    log.warning(f"获取指标失败: HTTP {response.status_code}")
+                    Logger.warning(f"获取指标失败: HTTP {response.status_code}")
                     return False
                 
                 metrics_text = response.text
@@ -114,7 +112,7 @@ class ResourceMonitor:
                 return True
         
         except Exception as e:
-            log.error(f"更新指标出错: {e}", exc_info=True)
+            Logger.error(f"更新指标出错: {e}", exc_info=True)
             return False
     
     def _parse_metrics(self, metrics_text: str):
@@ -163,7 +161,7 @@ class SystemMonitor:
         self.cpu_monitor = ResourceMonitor(cpu_metrics_url, service_name="CPU")
         self.last_update_time = 0.0
         
-        log.info("系统监控器初始化完成")
+        Logger.info("系统监控器初始化完成")
     
     async def update_metrics(self) -> Tuple[bool, bool]:
         """同时更新GPU和CPU指标

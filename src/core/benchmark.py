@@ -1,6 +1,6 @@
 """基准测试模块
 
-# Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+# Copyright (c) Huawei TechnoLoggeries Co., Ltd. 2025-2025. All rights reserved.
 """
 import asyncio
 from typing import Dict, Tuple, Optional
@@ -13,8 +13,6 @@ from src.utils.logger import Logger
 from src.utils.config import ServicePerformance
 from src.utils.config import PREFILL_URL, DECODE_URL, GPU_METRICS_URL, CPU_METRICS_URL
 from src.utils.config import DEFAULT_TEST_PROMPT, DEFAULT_TEST_TOKENS, DEFAULT_MODEL
-
-log = Logger
 
 class PerformanceTester:
     """性能测试工具，在启动时测量GPU和CPU服务的性能"""
@@ -53,7 +51,7 @@ class PerformanceTester:
         
         这是一个备用方法，实现与用户提供的代码类似的功能
         """
-        log.info("开始基准测试...")
+        Logger.info("开始基准测试...")
         
         try:
             # 如果没有设置adaptive_decoder，则创建临时调度决策器
@@ -63,7 +61,7 @@ class PerformanceTester:
                     system_monitor=self.system_monitor,
                     scheduling_decider=temp_decider
                 )
-                log.info("为性能测试创建临时自适应解码器")
+                Logger.info("为性能测试创建临时自适应解码器")
             
             # 0. 在测试前更新一次指标，获取基准值
             await self.system_monitor.update_metrics()
@@ -75,7 +73,7 @@ class PerformanceTester:
             gpu_results = await self._test_gpu_performance(decode_data)
             
             if not gpu_results:
-                log.warning("GPU性能测试失败，使用默认值")
+                Logger.warning("GPU性能测试失败，使用默认值")
                 gpu_latency, final_gpu_throughput = 1000.0, 10.0
             else:
                 gpu_latency, final_gpu_throughput = gpu_results
@@ -84,7 +82,7 @@ class PerformanceTester:
             cpu_results = await self._test_cpu_performance(decode_data)
             
             if not cpu_results:
-                log.warning("CPU性能测试失败，使用默认值")
+                Logger.warning("CPU性能测试失败，使用默认值")
                 cpu_latency, final_cpu_throughput = 2000.0, 1.0
             else:
                 cpu_latency, final_cpu_throughput = cpu_results
@@ -99,10 +97,10 @@ class PerformanceTester:
                 f"CPU延迟={cpu_latency:.2f}ms, CPU吞吐量={final_cpu_throughput:.2f}tokens/s\n" + \
                 f"GPU/CPU性能比={self.performance_ratio:.2f}x"
             
-            log.info(result_msg)
+            Logger.info(result_msg)
             
         except Exception as e:
-            log.error(f"基准测试失败: {str(e)}", exc_info=True)
+            Logger.error(f"基准测试失败: {str(e)}", exc_info=True)
     
     async def _prepare_test_data(self, prompt: str) -> Dict:
         """准备测试数据，在GPU上执行prefill
@@ -114,7 +112,7 @@ class PerformanceTester:
             Dict: 包含decode所需参数的字典
         """
         try:
-            log.info("准备prefill测试数据")
+            Logger.info("准备prefill测试数据")
             
             # 在GPU上执行prefill
             prefill_data = {
@@ -124,12 +122,12 @@ class PerformanceTester:
                 "temperature": 0,  # 基准测试固定使用temperature=0
                 "prefill_then_swapout": True
             }
-            log.info(f"执行prefill请求，prompt长度={len(prompt)}")
+            Logger.info(f"执行prefill请求，prompt长度={len(prompt)}")
 
             prefill_result = await self.adaptive_decoder.prefill_request(prefill_data)
             completion_id = prefill_result["completion_id"]
             active_token = prefill_result["active_token"]
-            log.info(f"prefill完成，获取到completion_id={completion_id}, active_token={active_token}")
+            Logger.info(f"prefill完成，获取到completion_id={completion_id}, active_token={active_token}")
             
             # 准备decode数据
             decode_data = {
@@ -141,24 +139,24 @@ class PerformanceTester:
                 "active_token": active_token
             }
             
-            log.info(f"准备好decode数据，model={self.model_name}, max_tokens={self.test_tokens}")
+            Logger.info(f"准备好decode数据，model={self.model_name}, max_tokens={self.test_tokens}")
             
             return decode_data
         except Exception as e:
-            log.error(f"准备测试数据失败: {e}", exc_info=True)
+            Logger.error(f"准备测试数据失败: {e}", exc_info=True)
             raise
     
     async def _test_gpu_performance(self, decode_data: Dict) -> Optional[Tuple[float, float]]:
         """测试GPU性能"""
         try:
-            log.info("测试GPU decode性能")
+            Logger.info("测试GPU decode性能")
             
             # 记录decode_data的详细信息
             decode_data_copy = decode_data.copy()
             if "prompt" in decode_data_copy:
                 prompt_length = len(decode_data_copy["prompt"])
                 decode_data_copy["prompt"] = f"[长度: {prompt_length}]"
-            log.info(f"GPU decode测试使用的参数: {decode_data_copy}")
+            Logger.info(f"GPU decode测试使用的参数: {decode_data_copy}")
             
             # 在性能测试前先刷新一次指标，确保获取最新值
             await self.system_monitor.update_metrics()
@@ -186,7 +184,7 @@ class PerformanceTester:
             
             # 如果差异非常小，可能指标还没更新，再多等待一下
             if gpu_decode_tokens_diff < 5 and self.test_tokens > 10:
-                log.info(f"指标差异较小({gpu_decode_tokens_diff})，等待更新...")
+                Logger.info(f"指标差异较小({gpu_decode_tokens_diff})，等待更新...")
                 await asyncio.sleep(3)
                 await self.system_monitor.update_metrics()
                 updated_gpu_metrics = self.system_monitor.get_gpu_metrics()
@@ -196,44 +194,44 @@ class PerformanceTester:
             metrics_throughput = 0
             if decode_time > 0 and gpu_decode_tokens_diff > 0:
                 metrics_throughput = gpu_decode_tokens_diff / decode_time
-                log.info(f"指标显示生成了{gpu_decode_tokens_diff}个tokens, 指标吞吐量={metrics_throughput:.2f}tokens/s")
+                Logger.info(f"指标显示生成了{gpu_decode_tokens_diff}个tokens, 指标吞吐量={metrics_throughput:.2f}tokens/s")
             
             # 同时记录文本长度信息作为参考
             if (gpu_decode_result["response"].get("choices") and 
                 gpu_decode_result["response"]["choices"][0].get("text")):
                 generated_text = gpu_decode_result["response"]["choices"][0]["text"]
                 # 仅作为参考信息记录
-                log.info(f"生成的文本长度: {len(generated_text)}字符, 文本内容: {generated_text[:50]}")
+                Logger.info(f"生成的文本长度: {len(generated_text)}字符, 文本内容: {generated_text[:50]}")
             
             # 使用指标数据作为最终吞吐量计算依据
             if gpu_decode_tokens_diff > 0:
                 final_gpu_throughput = metrics_throughput
-                log.info(f"使用指标计算的吞吐量: {final_gpu_throughput:.2f}tokens/s")
+                Logger.info(f"使用指标计算的吞吐量: {final_gpu_throughput:.2f}tokens/s")
             else:
                 # 备用方案：使用预期的token数
                 estimated_tokens = self.test_tokens
                 time_based_throughput = estimated_tokens / decode_time if decode_time > 0 else 0
                 final_gpu_throughput = time_based_throughput
-                log.info(f"无法获取指标数据，使用预期token数({estimated_tokens})计算吞吐量: {final_gpu_throughput:.2f}tokens/s")
+                Logger.info(f"无法获取指标数据，使用预期token数({estimated_tokens})计算吞吐量: {final_gpu_throughput:.2f}tokens/s")
             
-            log.info(f"GPU性能: 延迟={gpu_latency:.2f}ms, 吞吐量={final_gpu_throughput:.2f}tokens/s")
+            Logger.info(f"GPU性能: 延迟={gpu_latency:.2f}ms, 吞吐量={final_gpu_throughput:.2f}tokens/s")
             
             return gpu_latency, final_gpu_throughput
         except Exception as e:
-            log.error(f"测试GPU性能失败: {e}", exc_info=True)
+            Logger.error(f"测试GPU性能失败: {e}", exc_info=True)
             return None
     
     async def _test_cpu_performance(self, decode_data: Dict) -> Optional[Tuple[float, float]]:
         """测试CPU性能"""
         try:
-            log.info("测试CPU decode性能")
+            Logger.info("测试CPU decode性能")
             
             # 记录decode_data的详细信息
             decode_data_copy = decode_data.copy()
             if "prompt" in decode_data_copy:
                 prompt_length = len(decode_data_copy["prompt"])
                 decode_data_copy["prompt"] = f"[长度: {prompt_length}]"
-            log.info(f"CPU decode测试使用的参数: {decode_data_copy}")
+            Logger.info(f"CPU decode测试使用的参数: {decode_data_copy}")
             
             # 在性能测试前先刷新一次指标，确保获取最新值
             await self.system_monitor.update_metrics()
@@ -261,7 +259,7 @@ class PerformanceTester:
             
             # 如果差异非常小，可能指标还没更新，再多等待一下
             if cpu_decode_tokens_diff < 5 and self.test_tokens > 10:
-                log.info(f"指标差异较小({cpu_decode_tokens_diff})，等待更新...")
+                Logger.info(f"指标差异较小({cpu_decode_tokens_diff})，等待更新...")
                 await asyncio.sleep(3)
                 await self.system_monitor.update_metrics()
                 updated_cpu_metrics = self.system_monitor.get_cpu_metrics()
@@ -271,30 +269,30 @@ class PerformanceTester:
             metrics_throughput = 0
             if decode_time > 0 and cpu_decode_tokens_diff > 0:
                 metrics_throughput = cpu_decode_tokens_diff / decode_time
-                log.info(f"指标显示生成了{cpu_decode_tokens_diff}个tokens, 指标吞吐量={metrics_throughput:.2f}tokens/s")
+                Logger.info(f"指标显示生成了{cpu_decode_tokens_diff}个tokens, 指标吞吐量={metrics_throughput:.2f}tokens/s")
             
             # 同时记录文本长度信息作为参考
             if (cpu_decode_result["response"].get("choices") and 
                 cpu_decode_result["response"]["choices"][0].get("text")):
                 generated_text = cpu_decode_result["response"]["choices"][0]["text"]
                 # 仅作为参考信息记录
-                log.info(f"生成的文本长度: {len(generated_text)}字符, 文本内容: {generated_text[:50]}")
+                Logger.info(f"生成的文本长度: {len(generated_text)}字符, 文本内容: {generated_text[:50]}")
             
             # 使用指标数据作为最终吞吐量计算依据
             if cpu_decode_tokens_diff > 0:
                 final_cpu_throughput = metrics_throughput
-                log.info(f"使用指标计算的吞吐量: {final_cpu_throughput:.2f}tokens/s")
+                Logger.info(f"使用指标计算的吞吐量: {final_cpu_throughput:.2f}tokens/s")
             else:
                 # 备用方案：使用默认的5 tokens/s估算
                 estimated_throughput = 5.0  # 基于测试，CPU的真实吞吐量约为5 tokens/s
-                log.info(f"无法获取指标数据，使用默认CPU吞吐量: {estimated_throughput:.2f}tokens/s")
+                Logger.info(f"无法获取指标数据，使用默认CPU吞吐量: {estimated_throughput:.2f}tokens/s")
                 final_cpu_throughput = estimated_throughput
             
-            log.info(f"CPU性能: 延迟={cpu_latency:.2f}ms, 吞吐量={final_cpu_throughput:.2f}tokens/s")
+            Logger.info(f"CPU性能: 延迟={cpu_latency:.2f}ms, 吞吐量={final_cpu_throughput:.2f}tokens/s")
             
             return cpu_latency, final_cpu_throughput
         except Exception as e:
-            log.error(f"测试CPU性能失败: {e}", exc_info=True)
+            Logger.error(f"测试CPU性能失败: {e}", exc_info=True)
             return None
     
     def _compare_throughput_methods(self, service_type: str, time_throughput: float, metrics_throughput: float) -> float:
@@ -302,11 +300,11 @@ class PerformanceTester:
         if time_throughput > 0 and metrics_throughput > 0:
             diff_percent = abs(time_throughput - metrics_throughput) / time_throughput * 100
             if diff_percent > 50:
-                log.warning(
+                Logger.warning(
                     f"{service_type}吞吐量计算差异较大: 时间计算={time_throughput:.2f}tokens/s, " + 
                     f"指标计算={metrics_throughput:.2f}tokens/s, 差异={diff_percent:.2f}%"
                 )
-                log.info(f"使用时间计算的吞吐量: {time_throughput:.2f}tokens/s")
+                Logger.info(f"使用时间计算的吞吐量: {time_throughput:.2f}tokens/s")
                 return time_throughput
         
         # 正常情况下使用指标计算的吞吐量，如果有的话
@@ -344,10 +342,10 @@ class PerformanceTester:
             latency_ratio = self.cpu_performance.avg_latency / self.gpu_performance.avg_latency
             # 综合考虑吞吐量和延迟
             self.performance_ratio = (throughput_ratio + latency_ratio) / 2
-            log.info(f"GPU/CPU性能比: {self.performance_ratio:.2f}x")
+            Logger.info(f"GPU/CPU性能比: {self.performance_ratio:.2f}x")
         else:
             self.performance_ratio = 10.0  # 默认值
-            log.info(f"使用默认性能比率: {self.performance_ratio}")
+            Logger.info(f"使用默认性能比率: {self.performance_ratio}")
     
     def get_performance_summary(self) -> Dict:
         """获取性能测试结果摘要"""

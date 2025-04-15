@@ -1,4 +1,4 @@
-# Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+# Copyright (c) Huawei TechnoLoggeries Co., Ltd. 2025-2025. All rights reserved.
 
 import httpx
 import json
@@ -12,8 +12,6 @@ from src.core.monitor import SystemMonitor
 from src.core.decider import SchedulingDecider
 from src.core.benchmark import PerformanceTester
 from src.utils.logger import Logger
-
-log = Logger
 
 # 全局变量引用 - 这些变量会在应用启动时由main.py注入
 system_monitor: Optional[SystemMonitor] = None  # 系统监控器实例
@@ -43,7 +41,7 @@ async def completions(request: Request):
         
         # 记录请求ID和时间戳
         request_id = f"req_{int(time.time())}_{id(request)}"
-        log.info(f"收到请求 {request_id}: prompt长度={len(prompt)}")
+        Logger.info(f"收到请求 {request_id}: prompt长度={len(prompt)}")
         
         try:
             # 第一步：执行prefill请求
@@ -65,7 +63,7 @@ async def completions(request: Request):
                 
         except httpx.RequestError as e:
             # 请求错误处理
-            log.error(f"请求 {request_id} 解码失败: {str(e)}")
+            Logger.error(f"请求 {request_id} 解码失败: {str(e)}")
             return {
                 "id": f"error_{request_id}",
                 "object": "text_completion",
@@ -84,7 +82,7 @@ async def completions(request: Request):
             }
         
         # 记录完成日志
-        log.info(f"请求 {request_id} 完成，decode耗时={decode_time:.3f}秒，服务={service_used}")
+        Logger.info(f"请求 {request_id} 完成，decode耗时={decode_time:.3f}秒，服务={service_used}")
         
         # 添加性能指标
         if "usage" not in result:
@@ -100,7 +98,7 @@ async def completions(request: Request):
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="无效的JSON")
     except Exception as e:
-        log.error(f"处理请求出错: {str(e)}", exc_info=True)
+        Logger.error(f"处理请求出错: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"内部服务器错误: {str(e)}")
 
 
@@ -137,7 +135,7 @@ async def test_decode_sequence(request: Request):
         
         # 记录请求
         sequence_desc = ", ".join([f"{s[0]}({s[1] if s[1] is not None else '无限制'})" for s in sequence])
-        log.info(f"收到解码序列测试请求: 序列=[{sequence_desc}], prompt长度={len(prompt)}")
+        Logger.info(f"收到解码序列测试请求: 序列=[{sequence_desc}], prompt长度={len(prompt)}")
         
         # 第一步：执行prefill请求
         prefill_result = await adaptive_decoder.prefill_request(data)
@@ -169,14 +167,14 @@ async def test_decode_sequence(request: Request):
             "service_used": service_used,
         }
         
-        log.info(f"解码序列测试完成: 服务={service_used}, 耗时={decode_time:.3f}秒")
+        Logger.info(f"解码序列测试完成: 服务={service_used}, 耗时={decode_time:.3f}秒")
         
         return result
         
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="无效的JSON")
     except Exception as e:
-        log.error(f"解码序列测试出错: {str(e)}", exc_info=True)
+        Logger.error(f"解码序列测试出错: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"内部服务器错误: {str(e)}")
 
 @router.get("/metrics")
@@ -191,8 +189,8 @@ async def get_metrics():
     gpu_metrics = system_monitor.get_gpu_metrics()
     cpu_metrics = system_monitor.get_cpu_metrics()
     
-    log.info(f"GPU指标: {gpu_metrics}")
-    log.info(f"CPU指标: {cpu_metrics}")
+    Logger.info(f"GPU指标: {gpu_metrics}")
+    Logger.info(f"CPU指标: {cpu_metrics}")
     
     # 格式化数值以提高可读性
     return JSONResponse(

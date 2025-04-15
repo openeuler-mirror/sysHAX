@@ -7,8 +7,6 @@ from typing import Dict
 from src.core.monitor import SystemMonitor
 from src.utils.logger import Logger
 
-log = Logger
-
 class SchedulingDecider:
     """调度决策类，根据系统指标决定在何处执行解码任务
     
@@ -38,4 +36,6 @@ class SchedulingDecider:
         await self.system_monitor.update_metrics()
         
         decision = {"device": "GPU", "token_limit": 0}
+        Logger.info(f"调度决策: {decision}")
+        
         return decision

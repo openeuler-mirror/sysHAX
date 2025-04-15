@@ -1,4 +1,4 @@
-# Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+# Copyright (c) Huawei TechnoLoggeries Co., Ltd. 2025-2025. All rights reserved.
 
 import httpx
 from typing import Dict, List, Tuple, Optional
@@ -9,9 +9,6 @@ from src.core.monitor import SystemMonitor
 from src.core.decider import SchedulingDecider
 from src.utils.config import PREFILL_URL, DECODE_URL
 from src.utils.logger import Logger
-
-# 使用自定义日志管理器
-log = Logger
 
 class AdaptiveDecoder:
     """自适应解码器，负责在GPU和CPU之间动态切换解码任务"""
@@ -42,7 +39,7 @@ class AdaptiveDecoder:
         prefill_data["prefill_then_swapout"] = True
         
         prompt_length = len(prefill_data.get("prompt", ""))
-        log.info(f"执行prefill请求: prompt长度={prompt_length}")
+        Logger.info(f"执行prefill请求: prompt长度={prompt_length}")
         
         async with httpx.AsyncClient() as client:
             try:
@@ -54,7 +51,7 @@ class AdaptiveDecoder:
                 )
                 
                 if response.status_code != 200:
-                    log.error(f"Prefill请求失败: HTTP {response.status_code}, 响应: {response.text}")
+                    Logger.error(f"Prefill请求失败: HTTP {response.status_code}, 响应: {response.text}")
                     raise Exception(f"Prefill请求失败: HTTP {response.status_code}")
                 
                 prefill_time = time.time() - start_time
@@ -72,7 +69,7 @@ class AdaptiveDecoder:
                 
                 active_token = prefill_response["choices"][0]["token_ids"][0]
                 
-                log.info(f"Prefill完成: 耗时={prefill_time:.3f}秒, completion_id={completion_id}")
+                Logger.info(f"Prefill完成: 耗时={prefill_time:.3f}秒, completion_id={completion_id}")
                 
                 return {
                     "response": prefill_response,
@@ -81,7 +78,7 @@ class AdaptiveDecoder:
                     "prefill_time": prefill_time
                 }
             except Exception as e:
-                log.error(f"Prefill请求异常: {str(e)}", exc_info=True)
+                Logger.error(f"Prefill请求异常: {str(e)}", exc_info=True)
                 raise
     
     async def decode_request(self, decode_data: Dict) -> Dict:
@@ -94,7 +91,7 @@ class AdaptiveDecoder:
             Dict: 解码结果
         """
         start_time = time.time()
-        log.info(f"开始动态解码请求：max_tokens={decode_data.get('max_tokens', 100)}")
+        Logger.info(f"开始动态解码请求：max_tokens={decode_data.get('max_tokens', 100)}")
         
         # 保存原始decode_data，用于后续接力解码
         original_decode_data = decode_data.copy()
@@ -113,7 +110,7 @@ class AdaptiveDecoder:
         
         while True:
             step_count += 1
-            log.info(f"---------- 解码步骤 {step_count} 开始 ----------")
+            Logger.info(f"---------- 解码步骤 {step_count} 开始 ----------")
             
             try:
                 # 调用调度决策器获取下一步解码信息，调度器返回一个字典：
@@ -124,7 +121,7 @@ class AdaptiveDecoder:
                 token_limit = decision["token_limit"]
                 
                 if device_type is None:
-                    log.warning("系统负载过高，终止解码")
+                    Logger.warning("系统负载过高，终止解码")
                     break
                 
                 # 处理token限制
@@ -135,7 +132,7 @@ class AdaptiveDecoder:
                     # token_limit为0时，使用剩余token数作为限制
                     token_limit = remaining_tokens
                 
-                log.info(f"调度决策：使用{device_type}解码，token限制={token_limit}")
+                Logger.info(f"调度决策：使用{device_type}解码，token限制={token_limit}")
                 
                 # 执行解码步骤
                 step_result = await self._execute_decode_step(
@@ -145,7 +142,7 @@ class AdaptiveDecoder:
                 )
                 
                 if not step_result["success"]:
-                    log.error(f"解码步骤失败: {step_result.get('error', '未知错误')}")
+                    Logger.error(f"解码步骤失败: {step_result.get('error', '未知错误')}")
                     break
                 
                 result = step_result["result"]
@@ -164,7 +161,7 @@ class AdaptiveDecoder:
                 accumulated_text = text_info["accumulated_text"]
                 total_tokens_generated += new_token_count
                 
-                log.info(f"新生成token数: {new_token_count}, 总计: {total_tokens_generated}/{max_tokens}")
+                Logger.info(f"新生成token数: {new_token_count}, 总计: {total_tokens_generated}/{max_tokens}")
                 
                 # 检查生成是否结束
                 token_info = {
@@ -177,7 +174,7 @@ class AdaptiveDecoder:
                     break
                 
                 # 准备下一步的解码数据
-                log.info(f"---------- 准备接力数据 ----------")
+                Logger.info(f"---------- 准备接力数据 ----------")
                 current_decode_data = self._prepare_continuation_for_relay(
                     original_decode_data,
                     result,
@@ -185,12 +182,12 @@ class AdaptiveDecoder:
                 )
                 
             except Exception as e:
-                log.error(f"解码步骤{step_count}异常: {str(e)}", exc_info=True)
+                Logger.error(f"解码步骤{step_count}异常: {str(e)}", exc_info=True)
                 if not decode_results:
                     raise ValueError(f"首次解码失败，无法继续: {str(e)}")
                 break
             
-            log.info(f"---------- 解码步骤 {step_count} 完成 ----------")
+            Logger.info(f"---------- 解码步骤 {step_count} 完成 ----------")
         
         return self._prepare_final_result(
             decode_results,
@@ -249,7 +246,7 @@ class AdaptiveDecoder:
                 )
                 
                 if response.status_code != 200:
-                    log.error(f"{service_type} Decode请求失败: HTTP {response.status_code}, 响应: {response.text}")
+                    Logger.error(f"{service_type} Decode请求失败: HTTP {response.status_code}, 响应: {response.text}")
                     raise Exception(f"{service_type} Decode请求失败: HTTP {response.status_code}")
                 
                 decode_time = time.time() - start_time
@@ -271,7 +268,7 @@ class AdaptiveDecoder:
                 elif generated_text:
                     token_count = int(len(generated_text) / 1.5)
                 
-                log.info(f"{service_type}解码完成: 耗时={decode_time:.3f}秒, 生成{token_count}个tokens")
+                Logger.info(f"{service_type}解码完成: 耗时={decode_time:.3f}秒, 生成{token_count}个tokens")
                 
                 return {
                     "response": response_json,
@@ -282,7 +279,7 @@ class AdaptiveDecoder:
                     "generated_text": generated_text
                 }
             except Exception as e:
-                log.error(f"{service_type}解码失败: {str(e)}", exc_info=True)
+                Logger.error(f"{service_type}解码失败: {str(e)}", exc_info=True)
                 raise
 
     # ===== 辅助工具函数 =====
@@ -314,7 +311,7 @@ class AdaptiveDecoder:
             step_result["result"] = result
             return step_result
         except Exception as e:
-            log.error(f"{device_type}解码失败: {str(e)}", exc_info=True)
+            Logger.error(f"{device_type}解码失败: {str(e)}", exc_info=True)
             step_result["success"] = False
             step_result["error"] = str(e)
             return step_result
@@ -361,12 +358,12 @@ class AdaptiveDecoder:
                 
                 if len(current_text) >= prompt_length + prev_text_length:
                     new_text = current_text[prompt_length + prev_text_length:]
-                    log.info(f"新生成的文本长度: {len(new_text)}字符")
+                    Logger.info(f"新生成的文本长度: {len(new_text)}字符")
                     
                     text_info["accumulated_text"] = accumulated_text + new_text
                     text_info["new_token_count"] = token_count or int(len(new_text) / 1.5)
                 else:
-                    log.warning(f"无法从echo文本中提取新内容，可能接力失败")
+                    Logger.warning(f"无法从echo文本中提取新内容，可能接力失败")
                     text_info["new_token_count"] = token_count
                     text_info["accumulated_text"] = current_text
             else:
@@ -428,7 +425,7 @@ class AdaptiveDecoder:
             reason = f"达到max_tokens限制({max_tokens})"
 
         if is_complete:
-            log.info(f"生成完成: {reason}")
+            Logger.info(f"生成完成: {reason}")
 
         return is_complete
 
@@ -486,7 +483,7 @@ class AdaptiveDecoder:
                 relay_data.pop(key, None)
             
         except Exception as e:
-            log.warning(f"准备接力数据出错: {str(e)}", exc_info=True)
+            Logger.warning(f"准备接力数据出错: {str(e)}", exc_info=True)
             # 简单接力备用方案
             try:
                 if (response.get("choices") and response["choices"][0].get("text")):
@@ -494,7 +491,7 @@ class AdaptiveDecoder:
                     relay_data["prompt"] = original_data.get("prompt", "") + generated_text
                     relay_data["echo"] = True
             except Exception as e2:
-                log.error(f"简单接力也失败: {str(e2)}")
+                Logger.error(f"简单接力也失败: {str(e2)}")
         
         return relay_data
     
@@ -536,7 +533,7 @@ class AdaptiveDecoder:
             
             final_result["service_type"] = service_used
         except Exception as e:
-            log.warning(f"更新性能指标出错: {str(e)}")
+            Logger.warning(f"更新性能指标出错: {str(e)}")
             if "service_type" not in final_result:
                 final_result["service_type"] = "未知"
             if "decode_time" not in final_result:
@@ -572,8 +569,8 @@ class AdaptiveDecoder:
         final_result["total_decode_steps"] = step_count
         final_result["total_decode_time"] = total_time
         
-        log.info(f"========== 动态解码完成 ==========")
-        log.info(f"总耗时: {total_time:.3f}秒, 总tokens: {total_tokens_generated}, 步骤: {step_count}")
+        Logger.info(f"========== 动态解码完成 ==========")
+        Logger.info(f"总耗时: {total_time:.3f}秒, 总tokens: {total_tokens_generated}, 步骤: {step_count}")
         
         return final_result
 
@@ -590,7 +587,7 @@ class AdaptiveDecoder:
             Dict: 最终的解码结果
         """
         start_time = time.time()
-        log.info(f"开始测试解码序列，共{len(sequence)}个阶段")
+        Logger.info(f"开始测试解码序列，共{len(sequence)}个阶段")
         
         results = []
         current_decode_data = decode_data.copy()
@@ -600,8 +597,8 @@ class AdaptiveDecoder:
         
         for idx, (service_type, token_limit) in enumerate(sequence):
             step_count = idx + 1
-            log.info(f"---------- 测试阶段 {step_count} 开始 ----------")
-            log.info(f"使用{service_type}解码，token限制={token_limit if token_limit is not None else '不限制'}")
+            Logger.info(f"---------- 测试阶段 {step_count} 开始 ----------")
+            Logger.info(f"使用{service_type}解码，token限制={token_limit if token_limit is not None else '不限制'}")
             
             try:
                 # 使用统一的_execute_decode_step方法执行解码
@@ -612,7 +609,7 @@ class AdaptiveDecoder:
                 )
                 
                 if not step_result["success"]:
-                    log.error(f"解码步骤失败: {step_result.get('error', '未知错误')}")
+                    Logger.error(f"解码步骤失败: {step_result.get('error', '未知错误')}")
                     break
                 
                 result = step_result["result"]
@@ -632,7 +629,7 @@ class AdaptiveDecoder:
                 accumulated_text = text_info["accumulated_text"]
                 total_tokens_generated += new_token_count
                 
-                log.info(f"新生成token数: {new_token_count}, 总计: {total_tokens_generated}")
+                Logger.info(f"新生成token数: {new_token_count}, 总计: {total_tokens_generated}")
                 
                 # 检查生成是否结束
                 token_info = {
@@ -642,12 +639,12 @@ class AdaptiveDecoder:
                     "is_first_step": idx == 0
                 }
                 if self._is_generation_complete(result, token_info):
-                    log.info("生成已完成，提前结束测试序列")
+                    Logger.info("生成已完成，提前结束测试序列")
                     break
                 
                 # 如果不是最后一段解码，准备下一段的数据
                 if idx < len(sequence) - 1:
-                    log.info(f"---------- 准备接力数据 ----------")
+                    Logger.info(f"---------- 准备接力数据 ----------")
                     current_decode_data = self._prepare_continuation_for_relay(
                         original_decode_data,  # 使用原始数据而不是第一个参数
                         result, 
@@ -655,12 +652,12 @@ class AdaptiveDecoder:
                     )
             
             except Exception as e:
-                log.error(f"解码阶段{step_count}异常: {str(e)}", exc_info=True)
+                Logger.error(f"解码阶段{step_count}异常: {str(e)}", exc_info=True)
                 if not results:
                     raise ValueError(f"首次解码失败，无法继续: {str(e)}")
                 break
             
-            log.info(f"---------- 测试阶段 {step_count} 完成 ----------")
+            Logger.info(f"---------- 测试阶段 {step_count} 完成 ----------")
         
         # 准备最终结果
         final_result = self._prepare_final_result(
@@ -671,6 +668,6 @@ class AdaptiveDecoder:
             start_time
         )
         
-        log.info(f"测试解码序列完成，总共执行了{len(results)}个阶段，生成了{total_tokens_generated}个tokens")
+        Logger.info(f"测试解码序列完成，总共执行了{len(results)}个阶段，生成了{total_tokens_generated}个tokens")
         
         return final_result
