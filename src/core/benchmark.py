@@ -1,6 +1,6 @@
 """基准测试模块
 
-# Copyright (c) Huawei TechnoLoggeries Co., Ltd. 2025-2025. All rights reserved.
+# Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 """
 import asyncio
 from typing import Dict, Tuple, Optional
