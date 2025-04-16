@@ -34,3 +34,15 @@ system:
   max_queue_size: 200
   # 请求超时时间(秒)
   request_timeout: 600
+
+decider:
+  # GPU缓存使用率阈值
+  gpu_cache_threshold: 95
+  # CPU吞吐量阈值
+  cpu_throughput_threshold: 5
+  # 任务转移到CPU的token限制倍数
+  token_limit_multiplier: 4
+  # 任务转移到CPU的token限制最小值
+  token_limit_min: 10
+  # 任务转移到CPU的token限制最大值
+  token_limit_max: 100
