@@ -84,16 +84,19 @@ class ResourceMonitor:
             'num_swapped': (RE_SWAPPED_REQS, int),
         }
     
-    async def update_metrics(self) -> bool:
+    async def update_metrics(self, force: bool = False) -> bool:
         """更新指标，只在需要时获取
         
+        Args:
+            force: 强制刷新，忽略时间间隔限制
+            
         Returns:
             更新是否成功
         """
         try:
             current_time = time.time()
-            # 如果上次更新是在更新间隔内，直接返回缓存的结果
-            if current_time - self.last_update_time < self.update_interval:
+            # 如果不是强制刷新且上次更新是在更新间隔内，直接返回缓存的结果
+            if not force and current_time - self.last_update_time < self.update_interval:
                 return True
             
             # 发起HTTP请求获取指标
@@ -163,14 +166,17 @@ class SystemMonitor:
         
         Logger.info("系统监控器初始化完成")
     
-    async def update_metrics(self) -> Tuple[bool, bool]:
+    async def update_metrics(self, force: bool = False) -> Tuple[bool, bool]:
         """同时更新GPU和CPU指标
+        
+        Args:
+            force: 强制刷新，忽略时间间隔限制
         
         Returns:
             元组 (GPU更新成功, CPU更新成功)
         """
-        gpu_success = await self.gpu_monitor.update_metrics()
-        cpu_success = await self.cpu_monitor.update_metrics()
+        gpu_success = await self.gpu_monitor.update_metrics(force=force)
+        cpu_success = await self.cpu_monitor.update_metrics(force=force)
         
         if gpu_success or cpu_success:
             self.last_update_time = time.time()
