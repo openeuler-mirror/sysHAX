@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI):
     1. 清理资源
     """
     # 确保日志目录存在
-    os.makedirs('Loggers', exist_ok=True)
+    os.makedirs('logs', exist_ok=True)
     
     # 创建系统监控器实例
     Components.monitor = SystemMonitor(
