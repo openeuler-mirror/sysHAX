@@ -58,6 +58,9 @@ TOKEN_LIMIT_MULTIPLIER = CONFIG["decider"]["token_limit_multiplier"]
 TOKEN_LIMIT_MIN = CONFIG["decider"]["token_limit_min"]
 TOKEN_LIMIT_MAX = CONFIG["decider"]["token_limit_max"]
 
+# 监控配置
+MONITOR_INTERVAL = CONFIG["monitor"]["interval"]
+
 @dataclass
 class ServicePerformance:
     """服务性能指标数据类

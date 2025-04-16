@@ -46,3 +46,7 @@ decider:
   token_limit_min: 10
   # 任务转移到CPU的token限制最大值
   token_limit_max: 100
+
+monitor:
+  # 监控间隔(秒)
+  interval: 5
