@@ -51,6 +51,13 @@ DEFAULT_TEMPERATURE = CONFIG["models"]["params"]["temperature"]
 DEFAULT_TEST_PROMPT = CONFIG["models"]["params"]["test_prompt"]
 DEFAULT_TEST_TOKENS = CONFIG["models"]["params"]["test_tokens"]
 
+# 调度决策器配置
+GPU_CACHE_THRESHOLD = CONFIG["decider"]["gpu_cache_threshold"]
+CPU_THROUGHPUT_THRESHOLD = CONFIG["decider"]["cpu_throughput_threshold"]
+TOKEN_LIMIT_MULTIPLIER = CONFIG["decider"]["token_limit_multiplier"]
+TOKEN_LIMIT_MIN = CONFIG["decider"]["token_limit_min"]
+TOKEN_LIMIT_MAX = CONFIG["decider"]["token_limit_max"]
+
 @dataclass
 class ServicePerformance:
     """服务性能指标数据类
