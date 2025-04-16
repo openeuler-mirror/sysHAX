@@ -33,6 +33,14 @@ class AdaptiveDecoder:
         """
         start_time = time.time()
         
+        # 在prefill前调用决策器判断是否接受新请求
+        decision = await self.scheduling_decider.make_scheduling_decision()
+
+        # 如果决策器返回的设备类型不是GPU，则拒绝接收新的prefill请求
+        if decision["device"] is not 'GPU':
+            Logger.warning("系统繁忙，拒绝接收新的prefill请求")
+            return {"error": "系统繁忙，请稍后再试", "status": "busy"}
+        
         # 准备prefill数据
         prefill_data = data.copy()
         prefill_data["max_tokens"] = 2
@@ -113,16 +121,15 @@ class AdaptiveDecoder:
             Logger.info(f"---------- 解码步骤 {step_count} 开始 ----------")
             
             try:
-                # 调用调度决策器获取下一步解码信息，调度器返回一个字典：
-                # device: 设备类型，None为繁忙
-                # token_limit: token限制，0为不限制直到达到max_tokens
+                # 调用调度决策器获取下一步解码信息
                 decision = await self.scheduling_decider.make_scheduling_decision()
                 device_type = decision["device"]
                 token_limit = decision["token_limit"]
                 
+                # 即使决策器返回None，也要继续解码（因为prefill已经完成）
                 if device_type is None:
-                    Logger.warning("系统负载过高，终止解码")
-                    break
+                    device_type = "GPU"  # 系统繁忙时默认使用GPU继续解码
+                    Logger.info("系统资源紧张，解码阶段继续使用GPU（不中断已开始的任务）")
                 
                 # 处理token限制
                 remaining_tokens = max(1, max_tokens - total_tokens_generated)
