@@ -4,6 +4,8 @@
 """
 from typing import Dict
 
+from src.utils.config import GPU_CACHE_THRESHOLD, CPU_THROUGHPUT_THRESHOLD
+from src.utils.config import TOKEN_LIMIT_MULTIPLIER, TOKEN_LIMIT_MIN, TOKEN_LIMIT_MAX
 from src.core.monitor import SystemMonitor
 from src.utils.logger import Logger
 
@@ -35,7 +37,35 @@ class SchedulingDecider:
         # 更新系统指标
         await self.system_monitor.update_metrics()
         
-        decision = {"device": "GPU", "token_limit": 0}
-        Logger.info(f"调度决策: {decision}")
+        # 获取GPU和CPU指标
+        gpu_metrics = self.system_monitor.get_gpu_metrics()
+        cpu_metrics = self.system_monitor.get_cpu_metrics()
         
+        # 获取GPU缓存使用率和CPU吞吐量
+        gpu_cache_usage = gpu_metrics['gpu_cache_usage'] * 100  # 转换为百分比
+        cpu_throughput = cpu_metrics['generation_throughput']  # tokens/s
+        
+        # 默认决策：使用GPU，无token限制
+        decision = {"device": "GPU", "token_limit": 0}
+        
+        # 检查GPU缓存使用率是否超过阈值
+        if gpu_cache_usage > GPU_CACHE_THRESHOLD:
+            # 如果CPU吞吐量小于阈值，停止接收新任务
+            if cpu_throughput < CPU_THROUGHPUT_THRESHOLD:
+                decision["device"] = None  # None表示系统繁忙
+                Logger.info("系统繁忙，停止接收新任务")
+            else:
+                # 否则将任务传输给CPU，设置token限制
+                decision["device"] = "CPU"
+                token_limit = self._calculate_token_limit(cpu_throughput)
+                decision["token_limit"] = token_limit
+                Logger.info(f"GPU缓存使用率过高({gpu_cache_usage:.1f}%)，任务转移到CPU，token限制: {token_limit}")
+        
+        Logger.info(f"调度决策: {decision}")
         return decision
+    
+    @staticmethod
+    def _calculate_token_limit(cpu_throughput: float) -> int:
+        """计算token限制"""
+        token = round(cpu_throughput * TOKEN_LIMIT_MULTIPLIER / 10) * 10
+        return min(max(token, TOKEN_LIMIT_MIN), TOKEN_LIMIT_MAX)

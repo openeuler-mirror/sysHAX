@@ -43,7 +43,7 @@ class ResourceMonitor:
         """
         self.metrics_url = metrics_url
         self.service_name = service_name
-        self.update_interval = 5.0
+        self.update_interval = 1.0
             
         # 配置日志信息
         Logger.info(f"初始化{service_name}监控：{metrics_url}, 更新间隔={self.update_interval}秒")
