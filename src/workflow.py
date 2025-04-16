@@ -37,7 +37,7 @@ class AdaptiveDecoder:
         decision = await self.scheduling_decider.make_scheduling_decision()
 
         # 如果决策器返回的设备类型不是GPU，则拒绝接收新的prefill请求
-        if decision["device"] is not 'GPU':
+        if decision["device"] != 'GPU':
             Logger.warning("系统繁忙，拒绝接收新的prefill请求")
             return {"error": "系统繁忙，请稍后再试", "status": "busy"}
         
