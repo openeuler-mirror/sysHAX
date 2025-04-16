@@ -8,6 +8,7 @@ import time
 
 from src.workflow import AdaptiveDecoder
 from src.core.decider import SchedulingDecider
+from src.core.monitor import SystemMonitor
 from src.utils.logger import Logger
 from src.utils.config import ServicePerformance
 from src.utils.config import PREFILL_URL, DECODE_URL
@@ -16,7 +17,7 @@ from src.utils.config import DEFAULT_TEST_PROMPT, DEFAULT_TEST_TOKENS, DEFAULT_M
 class PerformanceTester:
     """性能测试工具，在启动时测量GPU和CPU服务的性能"""
     
-    def __init__(self, system_monitor=None, decoder=None):
+    def __init__(self, system_monitor: SystemMonitor, decoder: AdaptiveDecoder):
         self.gpu_service_url = PREFILL_URL
         self.cpu_service_url = DECODE_URL
         
@@ -54,30 +55,36 @@ class PerformanceTester:
                 )
                 Logger.info("为性能测试创建临时自适应解码器")
             
-            # 0. 在测试前更新一次指标，获取基准值
-            await self.system_monitor.update_metrics()
+            # 0. 对测试数据进行prefill，准备decode数据
+            decode_data = await self._prepare_test_data()
+            if not decode_data:
+                Logger.error("准备测试数据失败，无法继续进行基准测试")
+                return
             
-            # 1. 准备测试数据
-            decode_data = await self._prepare_test_data(self.test_prompt)
+            # 1. 在decode测试前更新一次指标，获取基准值，强制刷新
+            await self.system_monitor.update_metrics(force=True)
+            Logger.info("-"*60)
+
+            # 2. 测试CPU性能
+            cpu_results = await self._test_performance(decode_data, device="CPU")
             
-            # 2. 测试GPU性能
-            gpu_results = await self._test_gpu_performance(decode_data)
-            
-            if not gpu_results:
-                Logger.warning("GPU性能测试失败，使用默认值")
-                gpu_latency, final_gpu_throughput = 1000.0, 10.0
+            if cpu_results:
+                cpu_latency, final_cpu_throughput = cpu_results
             else:
-                gpu_latency, final_gpu_throughput = gpu_results
-            
-            # 3. 测试CPU性能
-            cpu_results = await self._test_cpu_performance(decode_data)
-            
-            if not cpu_results:
                 Logger.warning("CPU性能测试失败，使用默认值")
                 cpu_latency, final_cpu_throughput = 2000.0, 1.0
-            else:
-                cpu_latency, final_cpu_throughput = cpu_results
+            Logger.info("-"*60)
+
+            # 3. 测试GPU性能
+            decode_data["max_tokens"] = decode_data["max_tokens"] * 10
+            gpu_results = await self._test_performance(decode_data, device="GPU")
             
+            if gpu_results:
+                gpu_latency, final_gpu_throughput = gpu_results
+            else:
+                Logger.warning("GPU性能测试失败，使用默认值")
+                gpu_latency, final_gpu_throughput = 1000.0, 10.0
+            Logger.info("-"*60)
             # 4. 保存测试结果并计算性能比率
             self._save_performance_results(
                 gpu_latency, final_gpu_throughput, 
@@ -93,12 +100,9 @@ class PerformanceTester:
         except Exception as e:
             Logger.error(f"基准测试失败: {str(e)}", exc_info=True)
     
-    async def _prepare_test_data(self, prompt: str) -> Dict:
+    async def _prepare_test_data(self) -> Dict:
         """准备测试数据，在GPU上执行prefill
         
-        Args:
-            prompt: 测试用的prompt文本
-            
         Returns:
             Dict: 包含decode所需参数的字典
         """
@@ -108,14 +112,19 @@ class PerformanceTester:
             # 在GPU上执行prefill
             prefill_data = {
                 "model": self.model_name,
-                "prompt": prompt,
+                "prompt": self.test_prompt,
                 "max_tokens": 2,
                 "temperature": 0,  # 基准测试固定使用temperature=0
                 "prefill_then_swapout": True
             }
-            Logger.info(f"执行prefill请求，prompt长度={len(prompt)}")
+            Logger.info(f"执行prefill请求，prompt长度={len(self.test_prompt)}")
 
             prefill_result = await self.adaptive_decoder.prefill_request(prefill_data)
+            
+            if prefill_result.get("status") == "busy":
+                Logger.warning("系统繁忙，无法执行基准测试")
+                return {}  # 返回空字典表示测试无法进行
+                
             completion_id = prefill_result["completion_id"]
             active_token = prefill_result["active_token"]
             Logger.info(f"prefill完成，获取到completion_id={completion_id}, active_token={active_token}")
@@ -123,7 +132,7 @@ class PerformanceTester:
             # 准备decode数据
             decode_data = {
                 "model": self.model_name,
-                "prompt": prompt,
+                "prompt": self.test_prompt,
                 "max_tokens": self.test_tokens,
                 "temperature": 0,  # 基准测试固定使用temperature=0
                 "continue_decoding": f"{completion_id}-0",
@@ -135,171 +144,64 @@ class PerformanceTester:
             return decode_data
         except Exception as e:
             Logger.error(f"准备测试数据失败: {e}", exc_info=True)
-            raise
+            return {}
     
-    async def _test_gpu_performance(self, decode_data: Dict) -> Optional[Tuple[float, float]]:
-        """测试GPU性能"""
+    async def _test_performance(self, decode_data: Dict, device: str) -> Optional[Tuple[float, float]]:
+        """测试硬件吞吐量"""
         try:
-            Logger.info("测试GPU decode性能")
+            Logger.info(f"测试{device} decode性能")
             
-            # 记录decode_data的详细信息
-            decode_data_copy = decode_data.copy()
-            if "prompt" in decode_data_copy:
-                prompt_length = len(decode_data_copy["prompt"])
-                decode_data_copy["prompt"] = f"[长度: {prompt_length}]"
-            Logger.info(f"GPU decode测试使用的参数: {decode_data_copy}")
+            # 简化参数记录
+            if "prompt" in decode_data:
+                prompt_length = len(decode_data["prompt"])
+                Logger.info(f"{device} decode测试: prompt长度={prompt_length}, max_tokens={decode_data.get('max_tokens', 0)}")
             
-            # 在性能测试前先刷新一次指标，确保获取最新值
-            await self.system_monitor.update_metrics()
-            fresh_gpu_metrics = self.system_monitor.get_gpu_metrics()
-            fresh_start_tokens = fresh_gpu_metrics['decode_tokens']
-            
-            # 使用time.time()直接测量开始和结束时间
+            # 执行GPU解码并测量时间
             start_time = time.time()
-            
-            # 执行GPU解码
-            gpu_decode_result = await self.adaptive_decoder.decode_on_gpu(decode_data)
-            
-            # 记录结束时间
-            end_time = time.time()
-            decode_time = end_time - start_time
-            
-            # 计算延迟（毫秒）
-            gpu_latency = decode_time * 1000
-            
-            # 获取GPU token指标 (优先使用)
-            await asyncio.sleep(2)  # 等待指标更新
-            await self.system_monitor.update_metrics()
-            updated_gpu_metrics = self.system_monitor.get_gpu_metrics()
-            gpu_decode_tokens_diff = updated_gpu_metrics['decode_tokens'] - fresh_start_tokens
-            
-            # 如果差异非常小，可能指标还没更新，再多等待一下
-            if gpu_decode_tokens_diff < 5 and self.test_tokens > 10:
-                Logger.info(f"指标差异较小({gpu_decode_tokens_diff})，等待更新...")
-                await asyncio.sleep(3)
-                await self.system_monitor.update_metrics()
-                updated_gpu_metrics = self.system_monitor.get_gpu_metrics()
-                gpu_decode_tokens_diff = updated_gpu_metrics['decode_tokens'] - fresh_start_tokens
-            
-            # 计算基于指标的吞吐量
-            metrics_throughput = 0
-            if decode_time > 0 and gpu_decode_tokens_diff > 0:
-                metrics_throughput = gpu_decode_tokens_diff / decode_time
-                Logger.info(f"指标显示生成了{gpu_decode_tokens_diff}个tokens, 指标吞吐量={metrics_throughput:.2f}tokens/s")
-            
-            # 同时记录文本长度信息作为参考
-            if (gpu_decode_result["response"].get("choices") and 
-                gpu_decode_result["response"]["choices"][0].get("text")):
-                generated_text = gpu_decode_result["response"]["choices"][0]["text"]
-                # 仅作为参考信息记录
-                Logger.info(f"生成的文本长度: {len(generated_text)}字符, 文本内容: {generated_text[:50]}")
-            
-            # 使用指标数据作为最终吞吐量计算依据
-            if gpu_decode_tokens_diff > 0:
-                final_gpu_throughput = metrics_throughput
-                Logger.info(f"使用指标计算的吞吐量: {final_gpu_throughput:.2f}tokens/s")
+            if device == "GPU":
+                decode_result = await self.adaptive_decoder.decode_on_gpu(decode_data)
             else:
-                # 备用方案：使用预期的token数
-                estimated_tokens = self.test_tokens
-                time_based_throughput = estimated_tokens / decode_time if decode_time > 0 else 0
-                final_gpu_throughput = time_based_throughput
-                Logger.info(f"无法获取指标数据，使用预期token数({estimated_tokens})计算吞吐量: {final_gpu_throughput:.2f}tokens/s")
+                decode_result = await self.adaptive_decoder.decode_on_cpu(decode_data)
+            decode_time = time.time() - start_time
+
+            # 计算生成时间（毫秒）
+            latency = decode_time * 1000
             
-            Logger.info(f"GPU性能: 延迟={gpu_latency:.2f}ms, 吞吐量={final_gpu_throughput:.2f}tokens/s")
+            # 计算实际吞吐量（用于验证指标准确性）
+            actual_throughput = 0.0
+            if decode_time > 0 and decode_result["response"].get("choices") and decode_result["response"]["choices"][0].get("token_ids"):
+                actual_tokens = len(decode_result["response"]["choices"][0]["token_ids"])
+                actual_throughput = actual_tokens / decode_time
+                Logger.info(f"{device}实际吞吐量: {actual_throughput:.2f}tokens/s")
             
-            return gpu_latency, final_gpu_throughput
+            await self.system_monitor.update_metrics(force=True)
+            updated_metrics = self.system_monitor.get_all_metrics()
+            throughput = updated_metrics[device.lower()]['generation_throughput']
+            final_throughput = throughput
+            
+            # 记录原生指标与实际计算值的差异（用于验证指标准确性）
+            if throughput > 0 and actual_throughput > 0:
+                diff_percent = abs(throughput - actual_throughput) / actual_throughput * 100
+                Logger.info(f"{device}吞吐量对比: vLLM指标={throughput:.2f}tokens/s, 实际计算={actual_throughput:.2f}tokens/s, 差异={diff_percent:.1f}%")
+                
+                # 如果差异过大，记录警告
+                if diff_percent > 30:
+                    Logger.warning(f"{device}吞吐量指标与实际计算值差异较大({diff_percent:.1f}%)，可能影响决策准确性")
+            
+            # 如果仍然无法获取吞吐量，返回None让外部使用默认值
+            if final_throughput <= 0:
+                Logger.warning(f"无法获取{device}吞吐量指标")
+                return None
+            
+            if device == "GPU":
+                latency = latency / 10
+                
+            Logger.info(f"{device}性能结果: 解码耗时={latency:.2f}ms, 吞吐量={final_throughput:.2f}tokens/s")
+            return latency, final_throughput
+            
         except Exception as e:
-            Logger.error(f"测试GPU性能失败: {e}", exc_info=True)
+            Logger.error(f"测试{device}性能失败: {e}", exc_info=True)
             return None
-    
-    async def _test_cpu_performance(self, decode_data: Dict) -> Optional[Tuple[float, float]]:
-        """测试CPU性能"""
-        try:
-            Logger.info("测试CPU decode性能")
-            
-            # 记录decode_data的详细信息
-            decode_data_copy = decode_data.copy()
-            if "prompt" in decode_data_copy:
-                prompt_length = len(decode_data_copy["prompt"])
-                decode_data_copy["prompt"] = f"[长度: {prompt_length}]"
-            Logger.info(f"CPU decode测试使用的参数: {decode_data_copy}")
-            
-            # 在性能测试前先刷新一次指标，确保获取最新值
-            await self.system_monitor.update_metrics()
-            fresh_cpu_metrics = self.system_monitor.get_cpu_metrics()
-            fresh_start_tokens = fresh_cpu_metrics['decode_tokens']
-            
-            # 使用time.time()直接测量开始和结束时间
-            start_time = time.time()
-            
-            # 执行CPU解码 - 注意：CPU解码可能使用了时间限制
-            cpu_decode_result = await self.adaptive_decoder.decode_on_cpu(decode_data)
-            
-            # 记录结束时间
-            end_time = time.time()
-            decode_time = end_time - start_time
-            
-            # 计算延迟（毫秒）
-            cpu_latency = decode_time * 1000
-            
-            # 获取CPU token指标 (优先使用)
-            await asyncio.sleep(2)  # 等待指标更新
-            await self.system_monitor.update_metrics()
-            updated_cpu_metrics = self.system_monitor.get_cpu_metrics()
-            cpu_decode_tokens_diff = updated_cpu_metrics['decode_tokens'] - fresh_start_tokens
-            
-            # 如果差异非常小，可能指标还没更新，再多等待一下
-            if cpu_decode_tokens_diff < 5 and self.test_tokens > 10:
-                Logger.info(f"指标差异较小({cpu_decode_tokens_diff})，等待更新...")
-                await asyncio.sleep(3)
-                await self.system_monitor.update_metrics()
-                updated_cpu_metrics = self.system_monitor.get_cpu_metrics()
-                cpu_decode_tokens_diff = updated_cpu_metrics['decode_tokens'] - fresh_start_tokens
-            
-            # 计算基于指标的吞吐量
-            metrics_throughput = 0
-            if decode_time > 0 and cpu_decode_tokens_diff > 0:
-                metrics_throughput = cpu_decode_tokens_diff / decode_time
-                Logger.info(f"指标显示生成了{cpu_decode_tokens_diff}个tokens, 指标吞吐量={metrics_throughput:.2f}tokens/s")
-            
-            # 同时记录文本长度信息作为参考
-            if (cpu_decode_result["response"].get("choices") and 
-                cpu_decode_result["response"]["choices"][0].get("text")):
-                generated_text = cpu_decode_result["response"]["choices"][0]["text"]
-                # 仅作为参考信息记录
-                Logger.info(f"生成的文本长度: {len(generated_text)}字符, 文本内容: {generated_text[:50]}")
-            
-            # 使用指标数据作为最终吞吐量计算依据
-            if cpu_decode_tokens_diff > 0:
-                final_cpu_throughput = metrics_throughput
-                Logger.info(f"使用指标计算的吞吐量: {final_cpu_throughput:.2f}tokens/s")
-            else:
-                # 备用方案：使用默认的5 tokens/s估算
-                estimated_throughput = 5.0  # 基于测试，CPU的真实吞吐量约为5 tokens/s
-                Logger.info(f"无法获取指标数据，使用默认CPU吞吐量: {estimated_throughput:.2f}tokens/s")
-                final_cpu_throughput = estimated_throughput
-            
-            Logger.info(f"CPU性能: 延迟={cpu_latency:.2f}ms, 吞吐量={final_cpu_throughput:.2f}tokens/s")
-            
-            return cpu_latency, final_cpu_throughput
-        except Exception as e:
-            Logger.error(f"测试CPU性能失败: {e}", exc_info=True)
-            return None
-    
-    def _compare_throughput_methods(self, service_type: str, time_throughput: float, metrics_throughput: float) -> float:
-        """比较两种吞吐量计算方法，并返回最终使用的值"""
-        if time_throughput > 0 and metrics_throughput > 0:
-            diff_percent = abs(time_throughput - metrics_throughput) / time_throughput * 100
-            if diff_percent > 50:
-                Logger.warning(
-                    f"{service_type}吞吐量计算差异较大: 时间计算={time_throughput:.2f}tokens/s, " + 
-                    f"指标计算={metrics_throughput:.2f}tokens/s, 差异={diff_percent:.2f}%"
-                )
-                Logger.info(f"使用时间计算的吞吐量: {time_throughput:.2f}tokens/s")
-                return time_throughput
-        
-        # 正常情况下使用指标计算的吞吐量，如果有的话
-        return metrics_throughput if metrics_throughput > 0 else time_throughput
     
     def _save_performance_results(self, 
         gpu_latency: float, gpu_throughput: float, 
