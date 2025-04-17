@@ -33,8 +33,8 @@ def load_config() -> Dict[str, Any]:
 CONFIG = load_config()
 
 # 服务URL配置
-PREFILL_URL = CONFIG["services"]["gpu"]["url"]
-DECODE_URL = CONFIG["services"]["cpu"]["url"]
+GPU_URL = CONFIG["services"]["gpu"]["url"]
+CPU_URL = CONFIG["services"]["cpu"]["url"]
 GPU_METRICS_URL = CONFIG["services"]["gpu"]["metrics_url"]
 CPU_METRICS_URL = CONFIG["services"]["cpu"]["metrics_url"]
 SYSHAX_HOST = CONFIG["services"]["conductor"]["host"]

@@ -7,7 +7,7 @@ import copy
 
 from src.core.monitor import SystemMonitor
 from src.core.decider import SchedulingDecider
-from src.utils.config import PREFILL_URL, DECODE_URL
+from src.utils.config import GPU_URL, CPU_URL
 from src.utils.logger import Logger
 
 class AdaptiveDecoder:
@@ -17,8 +17,8 @@ class AdaptiveDecoder:
         """初始化自适应解码器"""
         self.system_monitor: SystemMonitor = system_monitor
         self.scheduling_decider: SchedulingDecider = scheduling_decider
-        self.prefill_url = PREFILL_URL
-        self.decode_url = DECODE_URL
+        self.prefill_url = GPU_URL
+        self.decode_url = CPU_URL
     
     # ===== 核心对外API =====
     
