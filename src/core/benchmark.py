@@ -2,7 +2,6 @@
 
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 """
-import asyncio
 from typing import Dict, Tuple, Optional
 import time
 
@@ -91,8 +90,8 @@ class PerformanceTester:
                 cpu_latency, final_cpu_throughput)
             
             result_msg = f"测试结果: \n" + \
-                f"GPU延迟={gpu_latency:.2f}ms, GPU吞吐量={final_gpu_throughput:.2f}tokens/s\n" + \
-                f"CPU延迟={cpu_latency:.2f}ms, CPU吞吐量={final_cpu_throughput:.2f}tokens/s\n" + \
+                f"GPU耗时={gpu_latency:.2f}ms, GPU吞吐量={final_gpu_throughput:.2f}tokens/s\n" + \
+                f"CPU耗时={cpu_latency:.2f}ms, CPU吞吐量={final_cpu_throughput:.2f}tokens/s\n" + \
                 f"GPU/CPU性能比={self.performance_ratio:.2f}x"
             
             Logger.info(result_msg)
@@ -167,10 +166,11 @@ class PerformanceTester:
             # 计算生成时间（毫秒）
             latency = decode_time * 1000
             
-            # 计算实际吞吐量（用于验证指标准确性）
+            # 计算实际吞吐量（统一用 usage.completion_tokens）
             actual_throughput = 0.0
-            if decode_time > 0 and decode_result["response"].get("choices") and decode_result["response"]["choices"][0].get("token_ids"):
-                actual_tokens = len(decode_result["response"]["choices"][0]["token_ids"])
+            usage = decode_result["response"].get("usage", {})
+            actual_tokens = usage.get("completion_tokens", 0)
+            if decode_time > 0 and actual_tokens > 0:
                 actual_throughput = actual_tokens / decode_time
                 Logger.info(f"{device}实际吞吐量: {actual_throughput:.2f}tokens/s")
             
@@ -182,7 +182,10 @@ class PerformanceTester:
             # 记录原生指标与实际计算值的差异（用于验证指标准确性）
             if throughput > 0 and actual_throughput > 0:
                 diff_percent = abs(throughput - actual_throughput) / actual_throughput * 100
-                Logger.info(f"{device}吞吐量对比: vLLM指标={throughput:.2f}tokens/s, 实际计算={actual_throughput:.2f}tokens/s, 差异={diff_percent:.1f}%")
+                Logger.info(f"{device}吞吐量对比: " + \
+                            f"vLLM指标={throughput:.2f}tokens/s, " + \
+                            f"实际计算={actual_throughput:.2f}tokens/s, " + \
+                            f"差异={diff_percent:.1f}%")
                 
                 # 如果差异过大，记录警告
                 if diff_percent > 30:
@@ -195,7 +198,7 @@ class PerformanceTester:
             
             if device == "GPU":
                 latency = latency / 10
-                
+
             Logger.info(f"{device}性能结果: 解码耗时={latency:.2f}ms, 吞吐量={final_throughput:.2f}tokens/s")
             return latency, final_throughput
             
