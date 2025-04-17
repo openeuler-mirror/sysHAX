@@ -8,7 +8,6 @@ from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse
 
 from src.utils.logger import Logger
-from src.components import Components
 
 # 创建路由器
 router = APIRouter()
@@ -20,7 +19,7 @@ async def completions(request: Request):
     1. 发送prefill请求到GPU服务，设置prefill_then_swapout=True
     2. 根据资源情况和请求特征，执行自适应解码
     """
-    adaptive_decoder = Components.adaptive_decoder
+    adaptive_decoder = request.app.state.adaptive_decoder
     if adaptive_decoder is None:
         raise HTTPException(status_code=500, detail="自适应解码器未初始化")
         
@@ -108,7 +107,7 @@ async def test_decode_sequence(request: Request):
         ]
     }
     """
-    adaptive_decoder = Components.adaptive_decoder
+    adaptive_decoder = request.app.state.adaptive_decoder
     if adaptive_decoder is None:
         raise HTTPException(status_code=500, detail="自适应解码器未初始化")
         
@@ -168,9 +167,9 @@ async def test_decode_sequence(request: Request):
         raise HTTPException(status_code=500, detail=f"内部服务器错误: {str(e)}")
 
 @router.get("/metrics")
-async def get_metrics():
+async def get_metrics(request: Request):
     """返回当前的资源指标"""
-    system_monitor = Components.monitor
+    system_monitor = request.app.state.monitor
     if system_monitor is None:
         raise HTTPException(status_code=500, detail="系统监控器未初始化")
         
