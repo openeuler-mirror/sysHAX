@@ -70,3 +70,44 @@ class ServicePerformance:
     """
     avg_latency: float  # 平均延迟，单位毫秒
     throughput: float   # 吞吐量，单位tokens/s
+
+@dataclass
+class DecodeData:
+    """Decode 阶段的数据格式
+    
+    保存用户的原始请求数据和Decode阶段的特有参数。
+    """
+    # 用户的原始请求数据
+    data: Dict[str, Any]
+    
+    # Decode相关参数
+    continue_decoding: str = ""
+    active_token: int = 0
+    completion_id: str = ""
+    
+    # 性能和调度信息
+    step: int = 0
+    latency: float = 0.0
+    throughput: float = 0.0
+    device: str = "CPU"
+    token_limit: int = 0
+    
+    def get_request_data(self) -> Dict[str, Any]:
+        """获取用于API请求的数据"""
+        request_data = self.data.copy()
+        
+        # 添加decode特有参数
+        if self.continue_decoding:
+            request_data["continue_decoding"] = self.continue_decoding
+        
+        if self.active_token:
+            request_data["active_token"] = self.active_token
+            
+        # 添加调度相关参数
+        if self.device:
+            request_data["device"] = self.device
+            
+        if self.token_limit > 0:
+            request_data["token_limit"] = self.token_limit
+            
+        return request_data

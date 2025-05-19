@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 
 from src.utils.config import GPU_METRICS_URL, CPU_METRICS_URL, SYSHAX_HOST, SYSHAX_PORT
 from src.core.monitor import SystemMonitor
-from src.core.decider import SchedulingDecider
+from src.core.scheduler import Scheduler
 from src.core.benchmark import PerformanceTester
 from src.workflow import AdaptiveDecoder
 from src.utils.logger import Logger
@@ -20,10 +20,10 @@ async def lifespan(app: FastAPI):
         gpu_metrics_url=GPU_METRICS_URL,
         cpu_metrics_url=CPU_METRICS_URL
     )
-    app.state.decider = SchedulingDecider(system_monitor=app.state.monitor)
+    app.state.scheduler = Scheduler(system_monitor=app.state.monitor)
     app.state.adaptive_decoder = AdaptiveDecoder(
         system_monitor=app.state.monitor,
-        scheduling_decider=app.state.decider
+        scheduler=app.state.scheduler
     )
     app.state.performance_tester = PerformanceTester(
         system_monitor=app.state.monitor,

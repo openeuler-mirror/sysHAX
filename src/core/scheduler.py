@@ -9,7 +9,7 @@ from src.utils.config import TOKEN_LIMIT_MULTIPLIER, TOKEN_LIMIT_MIN, TOKEN_LIMI
 from src.core.monitor import SystemMonitor
 from src.utils.logger import Logger
 
-class SchedulingDecider:
+class Scheduler:
     """调度决策类，根据系统指标决定在何处执行解码任务
     
     职责：
@@ -25,7 +25,7 @@ class SchedulingDecider:
         """
         self.system_monitor: SystemMonitor = system_monitor
     
-    async def make_scheduling_decision(self) -> Dict:
+    async def scheduler(self) -> Dict:
         """做出调度决策，返回设备类型和token限制
         
         Returns:

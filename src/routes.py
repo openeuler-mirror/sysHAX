@@ -3,11 +3,12 @@
 import httpx
 import json
 import time
-from typing import Dict
+from typing import Dict, Any, List
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse
 
 from src.utils.logger import Logger
+from src.utils.config import GPU_URL, CPU_URL
 
 # 创建路由器
 router = APIRouter()
@@ -28,50 +29,50 @@ async def completions(request: Request):
         data: Dict = await request.json()
         prompt = data.get("prompt", "")
         
-        # 记录请求ID和时间戳
-        request_id = f"req_{int(time.time())}_{id(request)}"
-        Logger.info(f"收到请求 {request_id}: prompt长度={len(prompt)}")
+        # 记录请求ID
+        Logger.info(f"收到请求，prompt: {prompt}")
         
-        try:
-            # 第一步：执行prefill请求
-            prefill_result = await adaptive_decoder.prefill_request(data)
+        # 1. 调度决策
+        # 直接使用应用状态中单独创建的 Scheduler
+        decision: Dict[str, Any] = await request.app.state.scheduler.scheduler()
+        # GPU 全流程
+        if decision.get("device") == "GPU":
+            async with httpx.AsyncClient() as client:
+                gpu_response = await client.post(
+                    GPU_URL,
+                    headers={"Content-Type": "application/json"},
+                    json=data,
+                    timeout=300
+                )
+            if gpu_response.status_code != 200:
+                Logger.error(f"GPU服务请求失败: HTTP {gpu_response.status_code}")
+                raise HTTPException(status_code=gpu_response.status_code, detail="GPU服务错误")
+            return JSONResponse(content=gpu_response.json())
+        
+        elif decision.get("device") == "CPU":
+            Logger.info(f"启动PD分离")
+            try:
+                # GPU Prefill
+                prefil_data = data.copy()
+                prefill_result = await adaptive_decoder.prefill_request(prefil_data)
+            except httpx.RequestError as e:
+                Logger.error(f"Prefill 请求失败: {str(e)}")
+                raise HTTPException(status_code=500, detail="Prefill 请求失败")
             completion_id = prefill_result["completion_id"]
-            active_token = prefill_result["active_token"]
-            
-            # 第二步：执行decode请求
+
             decode_data = data.copy()
-            decode_data["continue_decoding"] = f"{completion_id}-0"
-            decode_data["active_token"] = active_token
-            
-            decode_result = await adaptive_decoder.decode_request(decode_data)
-            
-            # 提取结果
-            result = decode_result["response"]
+            decode_result = await adaptive_decoder.decode_request(decode_data, completion_id, decision)
+            # 提取最后一次 decode 的原始 response
+            result = decode_result["result"]["response"]
             decode_time = decode_result["decode_time"]
-            service_used = decode_result["service_type"]
-                
-        except httpx.RequestError as e:
-            # 请求错误处理
-            Logger.error(f"请求 {request_id} 解码失败: {str(e)}")
-            return {
-                "id": f"error_{request_id}",
-                "object": "text_completion",
-                "created": int(time.time()),
-                "model": data.get("model", "unknown"),
-                "choices": [{
-                    "text": "处理请求时发生错误，请稍后再试。",
-                    "index": 0,
-                    "finish_reason": "error"
-                }],
-                "usage": {
-                    "prompt_tokens": len(prompt.split()),
-                    "completion_tokens": 0,
-                    "total_tokens": len(prompt.split())
-                }
-            }
+            # 收集所有解码步骤使用的服务类型列表
+            service_used: List[str] = [step.get("service_type") for step in decode_result.get("decode_results", [])]
+        else:
+            # 系统繁忙
+            return JSONResponse(content={"error": "系统繁忙，请稍后再试"}, status_code=503)
         
         # 记录完成日志
-        Logger.info(f"请求 {request_id} 完成，decode耗时={decode_time:.3f}秒，服务={service_used}")
+        Logger.info(f"请求 {completion_id} 完成，decode耗时={decode_time:.3f}秒，服务序列={service_used}")
         
         # 添加性能指标
         if "usage" not in result:
@@ -94,17 +95,13 @@ async def completions(request: Request):
 # 添加一个新的端点，用于测试自定义解码序列（主要用于测试）
 @router.post("/v1/test/decode_sequence")
 async def test_decode_sequence(request: Request):
-    """执行自定义解码序列测试
-    
+    """执行解码测试：GPU prefill + CPU decode
+
     请求格式：
     {
         "model": 模型名称,
         "prompt": "测试提示词",
-        "max_tokens": 50,
-        "sequence": [
-            ["CPU", 10],   // [设备类型, token限制]
-            ["GPU", null]  // null表示不限制token数量
-        ]
+        "max_tokens": 50
     }
     """
     adaptive_decoder = request.app.state.adaptive_decoder
@@ -115,37 +112,20 @@ async def test_decode_sequence(request: Request):
         # 获取请求数据
         data: Dict = await request.json()
         prompt = data.get("prompt", "")
+        Logger.info(f"收到测试解码请求: prompt长度={len(prompt)}")
         
-        # 获取解码序列，默认为CPU到GPU的切换
-        sequence_data = data.get("sequence", [["CPU", 10], ["GPU", None]])
-        
-        # 转换为预期的格式
-        sequence = [(item[0], item[1]) for item in sequence_data]
-        
-        # 记录请求
-        sequence_desc = ", ".join([f"{s[0]}({s[1] if s[1] is not None else '无限制'})" for s in sequence])
-        Logger.info(f"收到解码序列测试请求: 序列=[{sequence_desc}], prompt长度={len(prompt)}")
-        
-        # 第一步：执行prefill请求
+        # 强制执行: GPU prefill + CPU decode
         prefill_result = await adaptive_decoder.prefill_request(data)
         completion_id = prefill_result["completion_id"]
-        active_token = prefill_result["active_token"]
-        
-        # 设置decode请求参数
+        # CPU decode via decode_request, 初始 token_limit = max_tokens+1
+        max_tokens = data.get("max_tokens", adaptive_decoder.default_max_tokens)
+        initial_decision = {"device": "CPU", "token_limit": max_tokens + 1}
         decode_data = data.copy()
-        decode_data["continue_decoding"] = f"{completion_id}-0"
-        decode_data["active_token"] = active_token
-        
-        # 执行测试解码序列
-        decode_result = await adaptive_decoder.test_decode_sequence(
-            decode_data, 
-            sequence
-        )
-        
-        # 提取结果
-        result = decode_result["response"]
+        decode_result = await adaptive_decoder.decode_request(decode_data, completion_id, initial_decision)
+        # 提取最后一次 decode 的原始 response
+        result = decode_result["result"]["response"]
         decode_time = decode_result["decode_time"]
-        service_used = decode_result["service_type"]
+        service_used = [step.get("service_type") for step in decode_result.get("decode_results", [])]
         
         # 添加性能指标
         if "usage" not in result:
@@ -156,8 +136,7 @@ async def test_decode_sequence(request: Request):
             "service_used": service_used,
         }
         
-        Logger.info(f"解码序列测试完成: 服务={service_used}, 耗时={decode_time:.3f}秒")
-        
+        Logger.info(f"解码序列测试完成: 服务序列={service_used}, 耗时={decode_time:.3f}秒")
         return result
         
     except json.JSONDecodeError:
