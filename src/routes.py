@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, NoReturn
+from typing import Any, NoReturn, Union
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -44,7 +44,9 @@ async def _gpu_completion(data: dict[str, Any]) -> JSONResponse:
 
 
 async def _cpu_completion(
-    data: dict[str, Any], adaptive_decoder: AdaptiveDecoder, decision: dict[str, Any],
+    data: dict[str, Any],
+    adaptive_decoder: AdaptiveDecoder,
+    decision: dict[str, Any],
 ) -> tuple[dict[str, Any], float, list[str], str]:
     Logger.info("启动PD分离")
     try:
@@ -62,8 +64,8 @@ async def _cpu_completion(
     return response, decode_time, service_used, completion_id
 
 
-@router.post("/v1/completions")
-async def completions(request: Request) -> JSONResponse | dict[str, Any]:
+@router.post("/v1/completions", response_model=None)
+async def completions(request: Request) -> Union[JSONResponse, dict[str, Any]]:  # noqa: UP007
     """
     处理完成请求
 
@@ -122,8 +124,8 @@ async def completions(request: Request) -> JSONResponse | dict[str, Any]:
 
 
 # 添加一个新的端点，用于测试自定义解码序列（主要用于测试）
-@router.post("/v1/test/decode_sequence")
-async def test_decode_sequence(request: Request) -> JSONResponse | dict[str, Any]:
+@router.post("/v1/test/decode_sequence", response_model=None)
+async def test_decode_sequence(request: Request) -> Union[JSONResponse, dict[str, Any]]:  # noqa: UP007
     """
     执行解码测试：GPU prefill + CPU decode
 
@@ -180,8 +182,8 @@ async def test_decode_sequence(request: Request) -> JSONResponse | dict[str, Any
         return result
 
 
-@router.get("/metrics")
-async def get_metrics(request: Request) -> JSONResponse | dict[str, Any]:
+@router.get("/metrics", response_model=None)
+async def get_metrics(request: Request) -> Union[JSONResponse, dict[str, Any]]:  # noqa: UP007
     """返回当前的资源指标"""
     system_monitor = request.app.state.monitor
     if system_monitor is None:
