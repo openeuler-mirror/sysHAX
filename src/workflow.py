@@ -1,18 +1,51 @@
-# Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+"""
+调度接口模块
+
+提供统一的调度接口，用于协调和管理解码任务的分发
+
+Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+"""
+
+from __future__ import annotations
+
+import time
+from typing import TYPE_CHECKING, Any, NoReturn
 
 import httpx
-from typing import Dict, Any
-import time
 
-from src.core.monitor import SystemMonitor
-from src.core.scheduler import Scheduler
-from src.utils.config import GPU_URL, CPU_URL, DEFAULT_MAX_TOKENS
+if TYPE_CHECKING:
+    from src.core.monitor import SystemMonitor
+    from src.core.scheduler import Scheduler
+from src.utils.config import CPU_URL, DEFAULT_MAX_TOKENS, GPU_URL
 from src.utils.logger import Logger
+
+
+class AdaptiveDecoderError(Exception):
+    """自适应解码器相关异常"""
+
+    def __init__(self, message: str, cause: Exception | None = None) -> None:
+        """
+        初始化自适应解码器异常
+
+        Args:
+            message: 错误信息
+            cause: 可选的原始异常
+
+        """
+        super().__init__(message)
+        self.cause = cause
+
+
+def _raise_error(message: str, cause: Exception | None = None) -> NoReturn:
+    """记录日志并抛出 AdaptiveDecoderError"""
+    Logger.error(message)
+    raise AdaptiveDecoderError(message, cause)
+
 
 class AdaptiveDecoder:
     """自适应解码器，负责在GPU和CPU之间动态切换解码任务"""
-    
-    def __init__(self, system_monitor, scheduler):
+
+    def __init__(self, system_monitor: SystemMonitor, scheduler: Scheduler) -> None:
         """初始化自适应解码器"""
         self.system_monitor: SystemMonitor = system_monitor
         self.scheduler: Scheduler = scheduler
@@ -21,7 +54,7 @@ class AdaptiveDecoder:
         self.default_max_tokens = DEFAULT_MAX_TOKENS
 
     # ===== 核心对外API =====
-    async def default_request(self, data: Dict[str, Any]) -> Dict:
+    async def default_request(self, data: dict[str, Any]) -> dict:
         """直接执行默认的 GPU 全流程请求"""
         start_time = time.time()
         # 直接将原始请求转发到 GPU 服务
@@ -30,70 +63,64 @@ class AdaptiveDecoder:
                 self.prefill_url,
                 headers={"Content-Type": "application/json"},
                 json=data,
-                timeout=300
+                timeout=300,
             )
         decode_time = time.time() - start_time
-        if response.status_code != 200:
-            Logger.error(f"默认请求失败: HTTP {response.status_code}, 响应: {response.text}")
-            raise Exception(f"默认请求失败: HTTP {response.status_code}")
+        if response.status_code != httpx.codes.OK:
+            _raise_error(f"默认请求失败: HTTP {response.status_code}, 响应: {response.text}")
         json_response = response.json()
-        return {
-            "response": json_response,
-            "decode_time": decode_time,
-            "service_type": "GPU"
-        }
-    
-    async def prefill_request(self, data: Dict[str, Any]) -> Dict:
-        """执行prefill请求
-        
+        return {"response": json_response, "decode_time": decode_time, "service_type": "GPU"}
+
+    async def prefill_request(self, data: dict[str, Any]) -> dict:
+        """
+        执行prefill请求
+
         Args:
             data: 包含model和prompt等参数的字典
-            
+
         Returns:
             Dict: 包含completion_id和相关信息的字典
+
         """
         start_time = time.time()
-        
+
         # 创建 PrefillData 对象，避免修改原始 data
         prefill_data = data.copy()
         # 设置num_decode_tokens=2（通过data字典）
         prefill_data["num_decode_tokens"] = 2
-        
+
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.post(
                     self.prefill_url,
                     headers={"Content-Type": "application/json"},
                     json=prefill_data,
-                    timeout=300
+                    timeout=300,
                 )
-                
-                if response.status_code != 200:
-                    Logger.error(f"Prefill请求失败: HTTP {response.status_code}, 响应: {response.text}")
-                    raise Exception(f"Prefill请求失败: HTTP {response.status_code}")
-                
+
+                if response.status_code != httpx.codes.OK:
+                    _raise_error(f"Prefill请求失败: HTTP {response.status_code}, 响应: {response.text}")
+
                 prefill_time = time.time() - start_time
                 prefill_response = response.json()
-                
+
                 # 提取必要信息
                 completion_id = prefill_response.get("id")
                 if not completion_id:
-                    raise Exception("Prefill响应缺少completion ID")
-                
-                Logger.info(f"Prefill完成: 耗时={prefill_time:.3f}秒, completion_id={completion_id}")
-                
-                # 仅返回生成的 request ID
-                return {
-                    "completion_id": completion_id,
-                    "prefill_time": prefill_time,
-                    "prefill_response": prefill_response,
-                }
-            
-            except Exception as e:
-                Logger.error(f"Prefill请求异常: {str(e)}", exc_info=True)
-                raise
-    
-    async def decode_request(self, decode_data: Dict[str, Any], completion_id: str, decision: Dict[str, Any]) -> Dict:
+                    _raise_error("Prefill响应缺少completion ID")
+                else:
+                    Logger.info(f"Prefill完成: 耗时={prefill_time:.3f}秒, completion_id={completion_id}")
+                    # 仅返回生成的 request ID
+                    return {
+                        "completion_id": completion_id,
+                        "prefill_time": prefill_time,
+                        "prefill_response": prefill_response,
+                    }
+
+            except (httpx.RequestError, ValueError) as e:
+                _raise_error(f"Prefill请求异常: {e!s}", e)
+
+    async def decode_request(self, decode_data: dict[str, Any], completion_id: str, decision: dict[str, Any]) -> dict:
         """执行解码请求，实现自适应解码，直到 finish_reason 不为 'scheduled'"""
         start_time = time.time()
         Logger.info(f"开始动态解码请求：max_tokens={decode_data.get('max_tokens', self.default_max_tokens)}")
@@ -122,10 +149,10 @@ class AdaptiveDecoder:
 
             try:
                 step_res = await self._execute_decode_step(request_data, device)
-            except Exception as e:
-                Logger.error(f"{device} 解码请求异常: {e}", exc_info=True)
+            except (AdaptiveDecoderError, httpx.RequestError, ValueError) as e:
+                Logger.error(f"{device} 解码请求异常: {e!s}", exc_info=True)
                 if not decode_results:
-                    raise ValueError(f"首次解码失败，无法继续: {str(e)}")
+                    _raise_error(f"首次解码失败，无法继续: {e!s}", e)
                 break
 
             completion_id = step_res.get("request_id", "")
@@ -134,7 +161,7 @@ class AdaptiveDecoder:
             decode_results.append(step_res)
             last_generated_text = step_res.get("generated_text", "")
             Logger.info(f"{device} 解码完成: finish_reason={finish_reason}, 共生成tokens={total_tokens_generated}")
-            
+
             # 下一轮使用新的调度决策
             curr_decision = await self.scheduler.scheduler()
 
@@ -147,9 +174,9 @@ class AdaptiveDecoder:
             "finish_reason": finish_reason,
             "decode_time": decode_time,
         }
-    
+
     # ===== 解码器基础实现 =====
-    async def _execute_decode_step(self, decode_data: Dict[str, Any], device_type: str) -> Dict[str, Any]:
+    async def _execute_decode_step(self, decode_data: dict[str, Any], device_type: str) -> dict[str, Any]:
         """执行单步解码：根据 device_type 发送请求，返回解码结果、生成文本和 token 数"""
         service_url = self.prefill_url if device_type == "GPU" else self.decode_url
         start_time = time.time()
@@ -158,12 +185,11 @@ class AdaptiveDecoder:
                 service_url,
                 headers={"Content-Type": "application/json"},
                 json=decode_data,
-                timeout=300
+                timeout=300,
             )
         decode_time = time.time() - start_time
-        if response.status_code != 200:
-            Logger.error(f"{device_type} 解码请求失败: HTTP {response.status_code}, 响应: {response.text}")
-            raise Exception(f"{device_type} 解码请求失败: HTTP {response.status_code}")
+        if response.status_code != httpx.codes.OK:
+            _raise_error(f"{device_type} 解码请求失败: HTTP {response.status_code}, 响应: {response.text}")
         resp_json = response.json()
         # 提取请求id
         request_id = resp_json.get("id", "")
