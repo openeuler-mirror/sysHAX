@@ -37,30 +37,24 @@ class PerformanceTester:
         try:
             # 0. 准备 decode 数据并获取原始 max_tokens
             test_data = await self._prepare_test_data()
-            orig_max_tokens = test_data.get("max_tokens", self.test_tokens)
+            max_tokens = test_data.get("max_tokens", self.test_tokens)
 
             # 1. GPU 测试（default_request）
-            test_data["max_tokens"] = orig_max_tokens * 10
+            test_data["max_tokens"] = max_tokens * 10
             gpu_res = await self.adaptive_decoder.default_request(test_data)
             gpu_time = gpu_res.get("decode_time", 0.0)
-            # 更新并获取 GPU metrics
-            await self.system_monitor.update_metrics(force=True)
-            gpu_metrics = self.system_monitor.get_gpu_metrics()
-            gpu_tp = gpu_metrics.get('generation_throughput', 0.0)
-            Logger.info(f"GPU性能测试: 耗时={gpu_time:.3f}s, metrics吞吐量={gpu_tp:.2f}tokens/s")
+            gpu_tp = await self._get_throughput("gpu", gpu_res)
+            Logger.info(f"GPU性能测试: 生成token={gpu_res.get('response', {}).get('usage', {}).get('completion_tokens', 0)}个, 耗时={gpu_time:.3f}s, metrics吞吐量={gpu_tp:.2f}tokens/s")
 
             # 2. CPU 测试（prefill_request + decode_request）
-            test_data["max_tokens"] = orig_max_tokens
+            test_data["max_tokens"] = max_tokens
             prefill = await self.adaptive_decoder.prefill_request(test_data)
             completion_id = prefill.get("completion_id")
-            decision = {"device": "CPU", "token_limit": orig_max_tokens + 1}
+            decision = {"device": "CPU", "token_limit": max_tokens + 1}
             cpu_res = await self.adaptive_decoder.decode_request(test_data, completion_id, decision)
             cpu_time = cpu_res.get("decode_time", 0.0)
-            # 更新并获取 CPU metrics
-            await self.system_monitor.update_metrics(force=True)
-            cpu_metrics = self.system_monitor.get_cpu_metrics()
-            cpu_tp = cpu_metrics.get('generation_throughput', 0.0)
-            Logger.info(f"CPU性能测试: 耗时={cpu_time:.3f}s, metrics吞吐量={cpu_tp:.2f}tokens/s")
+            cpu_tp = await self._get_throughput("cpu", cpu_res)
+            Logger.info(f"CPU性能测试: 生成token={cpu_res.get('total_tokens_generated', 0)}个, 耗时={cpu_time:.3f}s, metrics吞吐量={cpu_tp:.2f}tokens/s")
 
             # 保存结果并计算比率
             self._save_performance_results(gpu_time * 1000, gpu_tp, cpu_time * 1000, cpu_tp)
@@ -94,6 +88,39 @@ class PerformanceTester:
         except Exception as e:
             Logger.error(f"准备测试数据失败: {e}", exc_info=True)
             return {}
+        
+    async def _get_throughput(self, device: str, res: Dict) -> float:
+        """获取指定设备的吞吐量"""
+        # 从原生metrics获取吞吐量
+        await self.system_monitor.update_metrics(force=True)
+        updated_metrics = self.system_monitor.get_all_metrics()
+        native_throughput = updated_metrics[device.lower()]['generation_throughput']
+        
+        # 通过生成tokens/s计算吞吐量
+        if device == "gpu":
+            generation_tokens = res.get("response", {}).get("usage", {}).get("completion_tokens", 0)
+            generation_time = res.get("decode_time", 0.0)
+            calculate_throughput = generation_tokens / generation_time
+        else:
+            generation_tokens = res.get("total_tokens_generated", 0)
+            generation_time = res.get("decode_time", 0.0)
+            calculate_throughput = generation_tokens / generation_time
+
+        print(f"native_throughput: {native_throughput}, calculate_throughput: {calculate_throughput}")
+        # 记录原生指标与实际计算值的差异（用于验证指标准确性）
+        if native_throughput > 0 and calculate_throughput > 0:
+            diff_percent = abs(native_throughput - calculate_throughput) / calculate_throughput * 100
+            Logger.info(f"{device}吞吐量对比: " + \
+                        f"vLLM指标={native_throughput:.2f}tokens/s, " + \
+                        f"实际计算={calculate_throughput:.2f}tokens/s, " + \
+                        f"差异={diff_percent:.1f}%")
+            
+            # 如果差异过大，记录警告
+            if diff_percent > 30:
+                Logger.warning(f"{device}吞吐量指标与实际计算值差异较大({diff_percent:.1f}%)，可能影响决策准确性，使用计算值")
+                return calculate_throughput
+
+        return native_throughput
     
     def _save_performance_results(self, 
         gpu_latency: float, gpu_throughput: float, 
