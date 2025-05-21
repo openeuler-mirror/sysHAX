@@ -25,17 +25,14 @@ def load_config() -> dict[str, Any]:
 
     # 从配置文件加载
     config_path = Path(__file__).parent.parent.parent / "config" / "config.yaml"
-    if config_path.exists():
-        try:
-            with config_path.open("r", encoding="utf-8") as f:
-                yaml_config = yaml.safe_load(f)
-                if yaml_config:
-                    config = yaml_config
-        except (OSError, yaml.YAMLError) as e:
-            Logger.error(f"加载配置文件失败: {e}")
-    else:
-        msg = f"配置文件不存在: {config_path}"
-        raise FileNotFoundError(msg)
+    assert config_path.exists(), "配置文件不存在"
+    try:
+        with config_path.open("r", encoding="utf-8") as f:
+            yaml_config = yaml.safe_load(f)
+            if yaml_config:
+                config = yaml_config
+    except (OSError, yaml.YAMLError) as e:
+        Logger.error(f"加载配置文件失败: {e}")
 
     return config
 
