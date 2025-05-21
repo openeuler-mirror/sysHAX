@@ -164,7 +164,8 @@ class AdaptiveDecoder:
             Logger.info(f"{device} 解码完成: finish_reason={finish_reason}, 共生成tokens={total_tokens_generated}")
 
             # 下一轮使用新的调度决策
-            curr_decision = await self.scheduler.scheduler()
+            if finish_reason == "scheduled":
+                curr_decision = await self.scheduler.scheduler()
 
         decode_time = time.time() - start_time
         return {
