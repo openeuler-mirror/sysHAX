@@ -1,7 +1,7 @@
 """
 基准测试模块
 
-# Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 """
 
 import asyncio
@@ -39,7 +39,8 @@ class PerformanceTester:
         # 性能测试结果
         self.gpu_performance = None
         self.cpu_performance = None
-        # 性能比率 (GPU/CPU)  # noqa: ERA001
+
+        # 性能比
         self.performance_ratio = 1.0
 
     async def run_benchmarks(self) -> None:
