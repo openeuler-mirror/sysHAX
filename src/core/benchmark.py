@@ -62,7 +62,9 @@ class PerformanceTester:
             # 2. CPU 测试（prefill_request + decode_request）
             test_data["max_tokens"] = max_tokens
             prefill = await self.adaptive_decoder.prefill_request(test_data)
-            completion_id = cast("str", prefill.get("completion_id"))
+            completion_id = prefill.get("completion_id")
+            assert completion_id is not None
+
             decision = {"device": "CPU", "token_limit": max_tokens + 1}
             cpu_res = await self.adaptive_decoder.decode_request(test_data, completion_id, decision)
             cpu_time = cpu_res.get("decode_time", 0.0)
