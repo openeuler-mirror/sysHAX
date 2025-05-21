@@ -3,7 +3,8 @@
 
 提供统一的调度接口，用于协调和管理解码任务的分发
 
-Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+Copyright (c) 2025 Huawei Technologies Co., Ltd.
+sysHAX is licensed under Mulan PSL v2. See LICENSE for details.
 """
 
 from __future__ import annotations

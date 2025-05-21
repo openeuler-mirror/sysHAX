@@ -1,5 +1,6 @@
 """
 核心模块
 
-Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+Copyright (c) 2025 Huawei Technologies Co., Ltd.
+sysHAX is licensed under Mulan PSL v2. See LICENSE for details.
 """
