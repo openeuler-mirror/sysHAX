@@ -5,7 +5,6 @@
 """
 
 import asyncio
-from typing import cast
 
 from src.core.monitor import SystemMonitor
 from src.utils.config import DEFAULT_MODEL, DEFAULT_TEST_PROMPT, DEFAULT_TEST_TOKENS, ServicePerformance
