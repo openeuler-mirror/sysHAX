@@ -117,6 +117,7 @@ def update_url_host_port(url: str, host: str | None = None, port: int | None = N
 
 # ---------- cmd_config 辅助函数 ----------
 def _load_cfg(path: Path) -> dict[str, Any]:
+    """加载配置文件"""
     if not path.exists():
         logger.error("配置文件不存在，请先运行 syshax init")
         sys.exit(1)
@@ -128,6 +129,7 @@ def _load_cfg(path: Path) -> dict[str, Any]:
 
 
 def _write_cfg(path: Path, cfg: dict[str, Any], key: str, value: str) -> None:
+    """写入配置文件"""
     try:
         path.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
         logger.info("已设置 %s 为 %s", key, value)
@@ -137,6 +139,7 @@ def _write_cfg(path: Path, cfg: dict[str, Any], key: str, value: str) -> None:
 
 
 def _update_gpu(cfg: dict[str, Any], sub: str, value: str) -> None:
+    """更新 GPU 配置"""
     url = cfg["services"]["gpu"]["url"]
     murl = cfg["services"]["gpu"]["metrics_url"]
     if sub == "host":
@@ -152,6 +155,7 @@ def _update_gpu(cfg: dict[str, Any], sub: str, value: str) -> None:
 
 
 def _update_cpu(cfg: dict[str, Any], sub: str, value: str) -> None:
+    """更新 CPU 配置"""
     url = cfg["services"]["cpu"]["url"]
     murl = cfg["services"]["cpu"]["metrics_url"]
     if sub == "host":
@@ -167,6 +171,7 @@ def _update_cpu(cfg: dict[str, Any], sub: str, value: str) -> None:
 
 
 def _update_conductor(cfg: dict[str, Any], sub: str, value: str) -> None:
+    """更新 conductor 配置"""
     if sub == "host":
         cfg["services"]["conductor"]["host"] = value
     elif sub == "port":
@@ -177,6 +182,7 @@ def _update_conductor(cfg: dict[str, Any], sub: str, value: str) -> None:
 
 
 def _update_model(cfg: dict[str, Any], key: str, value: str) -> None:
+    """更新模型配置"""
     if key == "model":
         cfg["models"]["default"] = value
     elif key == "maxtokens":
