@@ -20,29 +20,25 @@ def load_config() -> dict[str, Any]:
     """
     加载配置
 
-    从配置文件config/config.yaml加载
+    优先读取 config/config.yaml，若不存在则读取 config/config.example.yaml，均不存在则报错
     """
-    config = {}
-
-    # 从配置文件加载
-    config_path = Path(__file__).parent.parent.parent / "config" / "config.yaml"
-    assert config_path.exists(), "配置文件不存在"
+    base = Path(__file__).parent.parent.parent / "config"
+    primary = base / "config.yaml"
     try:
-        with config_path.open("r", encoding="utf-8") as f:
-            yaml_config = yaml.safe_load(f)
-            if yaml_config:
-                config = yaml_config
-    except (OSError, yaml.YAMLError) as e:
-        Logger.error(f"加载配置文件失败: {e}")
-
-    return config
+        with primary.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+            return data or {}
+    except (OSError, yaml.YAMLError, FileNotFoundError):
+        Logger.error("请配置 config/config.yaml 文件")
+        fallback = base / "config.example.yaml"
+        assert fallback.exists(), "未检测到 config/config.example.yaml 文件"
+        with fallback.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+            return data or {}
 
 
 # 加载配置
-try:
-    CONFIG = load_config()
-except AssertionError:
-    CONFIG = {}
+CONFIG = load_config()
 
 # 常量赋值，如配置存在
 try:
