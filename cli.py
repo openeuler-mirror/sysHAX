@@ -107,12 +107,17 @@ def cmd_model() -> None:
 
 
 def update_url_host_port(url: str, host: str | None = None, port: int | None = None) -> str:
-    """更新 URL 中的 host 或 port"""
+    """更新 URL 中的 host 或 port，并保留原始占位符"""
     p = urlparse(url)
-    hostname = host or p.hostname
-    portnum = port or p.port
-    netloc = f"{hostname}:{portnum}" if portnum is not None else hostname
-    return urlunparse(p._replace(netloc=netloc))
+    orig_netloc = p.netloc
+    if ":" in orig_netloc:
+        orig_hostname, orig_port = orig_netloc.split(":", 1)
+    else:
+        orig_hostname, orig_port = orig_netloc, None
+    new_hostname = host or orig_hostname
+    new_port = str(port) if port is not None else orig_port
+    new_netloc = f"{new_hostname}:{new_port}" if new_port else new_hostname
+    return urlunparse(p._replace(netloc=new_netloc))
 
 
 # ---------- cmd_config 辅助函数 ----------
@@ -198,8 +203,17 @@ def cmd_config(args: argparse.Namespace) -> None:
     """设置配置项"""
     key, value = args.key, args.value
     cfg_path = BASE_DIR / "config" / "config.yaml"
+    # 如果 config.yaml 不存在，先自动初始化
+    if not cfg_path.exists():
+        logger.info("配置文件不存在，自动初始化配置文件")
+        cmd_init()
     cfg = _load_cfg(cfg_path)
-    if "." in key:
+    # 一次更新所有服务的 host
+    if key == "host":
+        _update_gpu(cfg, "host", value)
+        _update_cpu(cfg, "host", value)
+        _update_conductor(cfg, "host", value)
+    elif "." in key:
         service, sub = key.split(".", 1)
         if service == "gpu":
             _update_gpu(cfg, sub, value)

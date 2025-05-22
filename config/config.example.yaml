@@ -5,16 +5,16 @@
 services:
   gpu:
     # GPU服务地址，请替换为实际地址
-    url: "http://{GPU_HOST}:{GPU_PORT}/v1/chat/completions"
-    metrics_url: "http://{GPU_HOST}:{GPU_PORT}/metrics"
+    url: "http://0.0.0.0:7001/v1/chat/completions"
+    metrics_url: "http://0.0.0.0:7001/metrics"
   cpu:
     # CPU服务地址，请替换为实际地址
-    url: "http://{CPU_HOST}:{CPU_PORT}/v1/chat/completions"
-    metrics_url: "http://{CPU_HOST}:{CPU_PORT}/metrics"
+    url: "http://0.0.0.0:7002/v1/chat/completions"
+    metrics_url: "http://0.0.0.0:7002/metrics"
   conductor:
     # sysHAX服务配置
-    host: "{APP_HOST}"
-    port: "{APP_PORT}"
+    host: "0.0.0.0"
+    port: 7010
 
 models:
   # 指定使用的模型
