@@ -29,7 +29,7 @@ def load_config() -> dict[str, Any]:
             data = yaml.safe_load(f)
             return data or {}
     except (OSError, yaml.YAMLError, FileNotFoundError):
-        Logger.error("请配置 config/config.yaml 文件")
+        Logger.warning("请配置 config/config.yaml 文件")
         fallback = base / "config.example.yaml"
         assert fallback.exists(), "未检测到 config/config.example.yaml 文件"
         with fallback.open("r", encoding="utf-8") as f:

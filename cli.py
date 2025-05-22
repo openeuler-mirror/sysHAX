@@ -39,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 main_run = None
 
 # 在文件顶部 imports 之后，添加 BASE_DIR
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(sys.path[0]).resolve()
 
 
 def get_version() -> str:
