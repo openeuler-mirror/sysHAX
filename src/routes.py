@@ -65,7 +65,7 @@ async def _cpu_completion(
     return response, decode_time, service_used, completion_id
 
 
-@router.post("/v1/completions", response_model=None)
+@router.post("/v1/chat/completions", response_model=None)
 async def completions(request: Request) -> Union[JSONResponse, dict[str, Any]]:  # noqa: UP007
     """
     处理完成请求
@@ -81,10 +81,13 @@ async def completions(request: Request) -> Union[JSONResponse, dict[str, Any]]: 
     try:
         # 获取请求数据
         data: dict[str, Any] = await request.json()
-        prompt = data.get("prompt", "")
+        # 从 messages 字段获取对话消息
+        messages = data.get("messages")
+        if messages is None:
+            raise_http_exception(400, "缺少 messages 字段")
 
         # 记录请求ID
-        Logger.info(f"收到请求，prompt: {prompt}")
+        Logger.info(f"收到请求，messages数量={len(messages)}")
 
         # 1. 调度决策
         # 直接使用应用状态中单独创建的 Scheduler
@@ -144,8 +147,11 @@ async def test_decode_sequence(request: Request) -> Union[JSONResponse, dict[str
     try:
         # 获取请求数据
         data: dict = await request.json()
-        prompt = data.get("prompt", "")
-        Logger.info(f"收到测试解码请求: prompt长度={len(prompt)}")
+        messages = data.get("messages")
+        if messages is None:
+            raise_http_exception(400, "缺少 messages 字段")
+
+        Logger.info(f"收到测试解码请求: messages数量={len(messages)}")
 
         # 强制执行: GPU prefill + CPU decode
         prefill_result = await adaptive_decoder.prefill_request(data)
