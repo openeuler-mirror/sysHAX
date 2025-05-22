@@ -37,37 +37,46 @@ def load_config() -> dict[str, Any]:
 
     return config
 
+
 # 加载配置
-CONFIG = load_config()
+try:
+    CONFIG = load_config()
+except AssertionError:
+    CONFIG = {}
 
-# 服务URL配置
-GPU_URL = CONFIG["services"]["gpu"]["url"]
-CPU_URL = CONFIG["services"]["cpu"]["url"]
-GPU_METRICS_URL = CONFIG["services"]["gpu"]["metrics_url"]
-CPU_METRICS_URL = CONFIG["services"]["cpu"]["metrics_url"]
-SYSHAX_HOST = CONFIG["services"]["conductor"]["host"]
-SYSHAX_PORT = CONFIG["services"]["conductor"]["port"]
+# 常量赋值，如配置存在
+try:
+    # 服务URL配置
+    GPU_URL = CONFIG["services"]["gpu"]["url"]
+    CPU_URL = CONFIG["services"]["cpu"]["url"]
+    GPU_METRICS_URL = CONFIG["services"]["gpu"]["metrics_url"]
+    CPU_METRICS_URL = CONFIG["services"]["cpu"]["metrics_url"]
+    SYSHAX_HOST = CONFIG["services"]["conductor"]["host"]
+    SYSHAX_PORT = CONFIG["services"]["conductor"]["port"]
 
-# 请求队列配置
-MAX_QUEUE_SIZE = CONFIG["system"]["max_queue_size"]
-REQUEST_TIMEOUT = CONFIG["system"]["request_timeout"]
+    # 请求队列配置
+    MAX_QUEUE_SIZE = CONFIG["system"]["max_queue_size"]
+    REQUEST_TIMEOUT = CONFIG["system"]["request_timeout"]
 
-# 模型配置
-DEFAULT_MODEL = CONFIG["models"]["default"]
-DEFAULT_MAX_TOKENS = CONFIG["models"]["params"]["max_tokens"]
-DEFAULT_TEMPERATURE = CONFIG["models"]["params"]["temperature"]
-DEFAULT_TEST_PROMPT = CONFIG["models"]["params"]["test_prompt"]
-DEFAULT_TEST_TOKENS = CONFIG["models"]["params"]["test_tokens"]
+    # 模型配置
+    DEFAULT_MODEL = CONFIG["models"]["default"]
+    DEFAULT_MAX_TOKENS = CONFIG["models"]["params"]["max_tokens"]
+    DEFAULT_TEMPERATURE = CONFIG["models"]["params"]["temperature"]
+    DEFAULT_TEST_PROMPT = CONFIG["models"]["params"]["test_prompt"]
+    DEFAULT_TEST_TOKENS = CONFIG["models"]["params"]["test_tokens"]
 
-# 调度决策器配置
-GPU_CACHE_THRESHOLD = CONFIG["decider"]["gpu_cache_threshold"]
-CPU_THROUGHPUT_THRESHOLD = CONFIG["decider"]["cpu_throughput_threshold"]
-TOKEN_LIMIT_MULTIPLIER = CONFIG["decider"]["token_limit_multiplier"]
-TOKEN_LIMIT_MIN = CONFIG["decider"]["token_limit_min"]
-TOKEN_LIMIT_MAX = CONFIG["decider"]["token_limit_max"]
+    # 调度决策器配置
+    GPU_CACHE_THRESHOLD = CONFIG["decider"]["gpu_cache_threshold"]
+    CPU_THROUGHPUT_THRESHOLD = CONFIG["decider"]["cpu_throughput_threshold"]
+    TOKEN_LIMIT_MULTIPLIER = CONFIG["decider"]["token_limit_multiplier"]
+    TOKEN_LIMIT_MIN = CONFIG["decider"]["token_limit_min"]
+    TOKEN_LIMIT_MAX = CONFIG["decider"]["token_limit_max"]
 
-# 监控配置
-MONITOR_INTERVAL = CONFIG["monitor"]["interval"]
+    # 监控配置
+    MONITOR_INTERVAL = CONFIG["monitor"]["interval"]
+except KeyError:
+    # 部分配置缺失时跳过
+    pass
 
 
 @dataclass
@@ -81,47 +90,3 @@ class ServicePerformance:
 
     avg_latency: float  # 平均延迟，单位毫秒
     throughput: float  # 吞吐量，单位tokens/s
-
-
-@dataclass
-class DecodeData:
-    """
-    Decode 阶段的数据格式
-
-    保存用户的原始请求数据和Decode阶段的特有参数。
-    """
-
-    # 用户的原始请求数据
-    data: dict[str, Any]
-
-    # Decode相关参数
-    continue_decoding: str = ""
-    active_token: int = 0
-    completion_id: str = ""
-
-    # 性能和调度信息
-    step: int = 0
-    latency: float = 0.0
-    throughput: float = 0.0
-    device: str = "CPU"
-    token_limit: int = 0
-
-    def get_request_data(self) -> dict[str, Any]:
-        """获取用于API请求的数据"""
-        request_data = self.data.copy()
-
-        # 添加decode特有参数
-        if self.continue_decoding:
-            request_data["continue_decoding"] = self.continue_decoding
-
-        if self.active_token:
-            request_data["active_token"] = self.active_token
-
-        # 添加调度相关参数
-        if self.device:
-            request_data["device"] = self.device
-
-        if self.token_limit > 0:
-            request_data["token_limit"] = self.token_limit
-
-        return request_data
