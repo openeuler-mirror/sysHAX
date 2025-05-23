@@ -23,19 +23,37 @@ from src.utils.logger import Logger
 
 # Prometheus指标正则匹配模式
 # 吞吐量指标 - vLLM原生吞吐量指标，tokens/s
-RE_GEN_THROUGHPUT = re.compile(r"vllm:avg_generation_throughput_toks_per_s{[^}]*}\s+([\d.]+)")  # 生成阶段吞吐量
-RE_PROMPT_THROUGHPUT = re.compile(r"vllm:avg_prompt_throughput_toks_per_s{[^}]*}\s+([\d.]+)")  # 输入处理阶段吞吐量
+RE_GEN_THROUGHPUT = re.compile(
+    r"vllm:avg_generation_throughput_toks_per_s{[^}]*}\s+([\d.]+)"
+)  # 生成阶段吞吐量
+RE_PROMPT_THROUGHPUT = re.compile(
+    r"vllm:avg_prompt_throughput_toks_per_s{[^}]*}\s+([\d.]+)"
+)  # 输入处理阶段吞吐量
 
 # 资源使用指标
-RE_GPU_CACHE = re.compile(r"vllm:gpu_cache_usage_perc{[^}]*}\s+([\d.]+)")  # GPU KV缓存使用率：值域0-1，1表示100%使用
-RE_CPU_CACHE = re.compile(r"vllm:cpu_cache_usage_perc{[^}]*}\s+([\d.]+)")  # CPU KV缓存使用率：值域0-1，1表示100%使用
-RE_RUNNING_REQS = re.compile(r"vllm:num_requests_running{[^}]*}\s+(\d+)")  # 运行中请求数：当前在GPU上执行的请求数量
-RE_WAITING_REQS = re.compile(r"vllm:num_requests_waiting{[^}]*}\s+(\d+)")  # 等待中请求数：等待GPU资源的请求数量
-RE_SWAPPED_REQS = re.compile(r"vllm:num_requests_swapped{[^}]*}\s+(\d+)")  # 已交换请求数：从GPU交换到CPU内存的请求数量
+RE_GPU_CACHE = re.compile(
+    r"vllm:gpu_cache_usage_perc{[^}]*}\s+([\d.]+)"
+)  # GPU KV缓存使用率：值域0-1，1表示100%使用
+RE_CPU_CACHE = re.compile(
+    r"vllm:cpu_cache_usage_perc{[^}]*}\s+([\d.]+)"
+)  # CPU KV缓存使用率：值域0-1，1表示100%使用
+RE_RUNNING_REQS = re.compile(
+    r"vllm:num_requests_running{[^}]*}\s+(\d+)"
+)  # 运行中请求数：当前在GPU上执行的请求数量
+RE_WAITING_REQS = re.compile(
+    r"vllm:num_requests_waiting{[^}]*}\s+(\d+)"
+)  # 等待中请求数：等待GPU资源的请求数量
+RE_SWAPPED_REQS = re.compile(
+    r"vllm:num_requests_swapped{[^}]*}\s+(\d+)"
+)  # 已交换请求数：从GPU交换到CPU内存的请求数量
 
 # Token计数指标
-RE_PREFILL_TOKENS = re.compile(r"vllm:prompt_tokens_total{[^}]*}\s+([\d.]+)")  # Prefill token累计总数
-RE_DECODE_TOKENS = re.compile(r"vllm:generation_tokens_total{[^}]*}\s+([\d.]+)")  # Decode token累计总数
+RE_PREFILL_TOKENS = re.compile(
+    r"vllm:prompt_tokens_total{[^}]*}\s+([\d.]+)"
+)  # Prefill token累计总数
+RE_DECODE_TOKENS = re.compile(
+    r"vllm:generation_tokens_total{[^}]*}\s+([\d.]+)"
+)  # Decode token累计总数
 
 
 class ResourceMonitor:
@@ -61,7 +79,9 @@ class ResourceMonitor:
         self.update_interval = MONITOR_INTERVAL
 
         # 配置日志信息
-        Logger.info(f"初始化{service_name}监控：{metrics_url}, 更新间隔={self.update_interval}秒")
+        Logger.info(
+            f"初始化{service_name}监控：{metrics_url}, 更新间隔={self.update_interval}秒"
+        )
 
         # 指标缓存
         self.last_update_time = 0.0
@@ -73,10 +93,10 @@ class ResourceMonitor:
             "num_running": 0,  # 运行中的请求数量
             "num_waiting": 0,  # 等待处理的请求数量
             "num_swapped": 0,  # 已交换到CPU内存的请求数量
-            # 吞吐量指标 (GPU和CPU有不同特性)  # noqa: ERA001
+            # 吞吐量指标 (GPU和CPU有不同特性)
             "generation_throughput": 0.0,  # 生成阶段吞吐量，GPU通常远高于CPU
             "prompt_throughput": 0.0,  # 处理输入阶段吞吐量，GPU优势较大
-            # token计数 (累计值)  # noqa: ERA001
+            # token计数 (累计值)
             "prefill_tokens": 0.0,  # 已处理的输入token总数
             "decode_tokens": 0.0,  # 已生成的token总数
         }
@@ -110,7 +130,10 @@ class ResourceMonitor:
         try:
             current_time = time.time()
             # 如果不是强制刷新且上次更新是在更新间隔内，直接返回缓存的结果
-            if not force and current_time - self.last_update_time < self.update_interval:
+            if (
+                not force
+                and current_time - self.last_update_time < self.update_interval
+            ):
                 return True
 
             # 发起HTTP请求获取指标
@@ -175,7 +198,11 @@ class SystemMonitor:
     2. 提供统一的接口获取所有指标
     """
 
-    def __init__(self, gpu_metrics_url: str = GPU_METRICS_URL, cpu_metrics_url: str = CPU_METRICS_URL) -> None:
+    def __init__(
+        self,
+        gpu_metrics_url: str = GPU_METRICS_URL,
+        cpu_metrics_url: str = CPU_METRICS_URL,
+    ) -> None:
         """初始化系统监控器"""
         self.gpu_monitor = ResourceMonitor(gpu_metrics_url, service_name="GPU")
         self.cpu_monitor = ResourceMonitor(cpu_metrics_url, service_name="CPU")
@@ -212,4 +239,8 @@ class SystemMonitor:
 
     def get_all_metrics(self) -> dict:
         """获取所有系统指标"""
-        return {"gpu": self.get_gpu_metrics(), "cpu": self.get_cpu_metrics(), "last_update": self.last_update_time}
+        return {
+            "gpu": self.get_gpu_metrics(),
+            "cpu": self.get_cpu_metrics(),
+            "last_update": self.last_update_time,
+        }

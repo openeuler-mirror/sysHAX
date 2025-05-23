@@ -115,7 +115,9 @@ def cmd_model() -> None:
     logger.info("temperature: %s", DEFAULT_TEMPERATURE)
 
 
-def update_url_host_port(url: str, host: str | None = None, port: int | None = None) -> str:
+def update_url_host_port(
+    url: str, host: str | None = None, port: int | None = None
+) -> str:
     """更新 URL 中的 host 或 port，并保留原始占位符"""
     p = urlparse(url)
     orig_netloc = p.netloc
@@ -145,7 +147,9 @@ def _load_cfg(path: Path) -> dict[str, Any]:
 def _write_cfg(path: Path, cfg: dict[str, Any], key: str, value: str) -> None:
     """写入配置文件"""
     try:
-        path.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        path.write_text(
+            yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8"
+        )
         logger.info("已设置 %s 为 %s", key, value)
     except OSError:
         logger.exception("写入配置失败")

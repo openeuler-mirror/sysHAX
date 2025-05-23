@@ -74,9 +74,15 @@ class AdaptiveDecoder:
             )
         decode_time = time.time() - start_time
         if response.status_code != httpx.codes.OK:
-            _raise_error(f"默认请求失败: HTTP {response.status_code}, 响应: {response.text}")
+            _raise_error(
+                f"默认请求失败: HTTP {response.status_code}, 响应: {response.text}"
+            )
         json_response = response.json()
-        return {"response": json_response, "decode_time": decode_time, "service_type": "GPU"}
+        return {
+            "response": json_response,
+            "decode_time": decode_time,
+            "service_type": "GPU",
+        }
 
     async def prefill_request(self, data: dict[str, Any]) -> dict:
         """
@@ -106,7 +112,9 @@ class AdaptiveDecoder:
                 )
 
                 if response.status_code != httpx.codes.OK:
-                    _raise_error(f"Prefill请求失败: HTTP {response.status_code}, 响应: {response.text}")
+                    _raise_error(
+                        f"Prefill请求失败: HTTP {response.status_code}, 响应: {response.text}"
+                    )
 
                 prefill_time = time.time() - start_time
                 prefill_response = response.json()
@@ -116,7 +124,9 @@ class AdaptiveDecoder:
                 if not completion_id:
                     _raise_error("Prefill响应缺少completion ID")
                 else:
-                    Logger.info(f"Prefill完成: 耗时={prefill_time:.3f}秒, completion_id={completion_id}")
+                    Logger.info(
+                        f"Prefill完成: 耗时={prefill_time:.3f}秒, completion_id={completion_id}"
+                    )
                     # 仅返回生成的 request ID
                     return {
                         "completion_id": completion_id,
@@ -127,10 +137,14 @@ class AdaptiveDecoder:
             except (httpx.RequestError, ValueError) as e:
                 _raise_error(f"Prefill请求异常: {e!s}", e)
 
-    async def decode_request(self, decode_data: dict[str, Any], completion_id: str, decision: dict[str, Any]) -> dict:
+    async def decode_request(
+        self, decode_data: dict[str, Any], completion_id: str, decision: dict[str, Any]
+    ) -> dict:
         """执行解码请求，实现自适应解码，直到 finish_reason 不为 'scheduled'"""
         start_time = time.time()
-        Logger.info(f"开始动态解码请求：max_tokens={decode_data.get('max_tokens', self.default_max_tokens)}")
+        Logger.info(
+            f"开始动态解码请求：max_tokens={decode_data.get('max_tokens', self.default_max_tokens)}"
+        )
 
         decode_results = []
         max_tokens = decode_data.get("max_tokens", self.default_max_tokens)
@@ -146,7 +160,9 @@ class AdaptiveDecoder:
             if device == "GPU" or token_limit == 0:
                 device = "GPU"
                 token_limit = max_tokens + 1
-            Logger.info(f"调度决策：使用{device}解码，token限制={token_limit or '不限'}")
+            Logger.info(
+                f"调度决策：使用{device}解码，token限制={token_limit or '不限'}"
+            )
 
             # 构造本轮请求数据
             request_data = decode_data.copy()
@@ -167,7 +183,9 @@ class AdaptiveDecoder:
             finish_reason = step_res.get("finish_reason")
             decode_results.append(step_res)
             last_generated_text = step_res.get("generated_text", "")
-            Logger.info(f"{device} 解码完成: finish_reason={finish_reason}, 共生成tokens={total_tokens_generated}")
+            Logger.info(
+                f"{device} 解码完成: finish_reason={finish_reason}, 共生成tokens={total_tokens_generated}"
+            )
 
             # 下一轮使用新的调度决策
             if finish_reason == "scheduled":
@@ -184,7 +202,9 @@ class AdaptiveDecoder:
         }
 
     # ===== 解码器基础实现 =====
-    async def _execute_decode_step(self, decode_data: dict[str, Any], device_type: str) -> dict[str, Any]:
+    async def _execute_decode_step(
+        self, decode_data: dict[str, Any], device_type: str
+    ) -> dict[str, Any]:
         """执行单步解码：根据 device_type 发送请求，返回解码结果、生成文本和 token 数"""
         service_url = self.prefill_url if device_type == "GPU" else self.decode_url
         start_time = time.time()
@@ -197,7 +217,9 @@ class AdaptiveDecoder:
             )
         decode_time = time.time() - start_time
         if response.status_code != httpx.codes.OK:
-            _raise_error(f"{device_type} 解码请求失败: HTTP {response.status_code}, 响应: {response.text}")
+            _raise_error(
+                f"{device_type} 解码请求失败: HTTP {response.status_code}, 响应: {response.text}"
+            )
         resp_json = response.json()
         # 提取请求id
         request_id = resp_json.get("id", "")
@@ -209,7 +231,9 @@ class AdaptiveDecoder:
             finish_reason = resp_json["choices"][0].get("finish_reason")
         # 提取新生成 token 数
         new_token_count = resp_json.get("usage", {}).get("completion_tokens", 0)
-        Logger.info(f"{device_type} 解码完成: 耗时={decode_time:.3f}秒, 生成{new_token_count}个tokens")
+        Logger.info(
+            f"{device_type} 解码完成: 耗时={decode_time:.3f}秒, 生成{new_token_count}个tokens"
+        )
         return {
             "request_id": request_id,
             "generated_text": generated_text,

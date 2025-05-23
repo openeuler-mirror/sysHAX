@@ -64,15 +64,19 @@ async def _cpu_completion(
         raise_http_exception(500, "Prefill 请求失败")
     completion_id = prefill_result["completion_id"]
     decode_data = data.copy()
-    decode_result = await adaptive_decoder.decode_request(decode_data, completion_id, decision)
+    decode_result = await adaptive_decoder.decode_request(
+        decode_data, completion_id, decision
+    )
     response = decode_result["result"]["response"]
     decode_time = decode_result["decode_time"]
-    service_used = [step.get("service_type") for step in decode_result.get("decode_results", [])]
+    service_used = [
+        step.get("service_type") for step in decode_result.get("decode_results", [])
+    ]
     return response, decode_time, service_used, completion_id
 
 
 @router.post("/v1/chat/completions", response_model=None)
-async def completions(request: Request) -> Union[JSONResponse, dict[str, Any]]:  # noqa: UP007
+async def completions(request: Request) -> Union[JSONResponse, dict[str, Any]]:
     """
     处理完成请求
 
@@ -104,13 +108,19 @@ async def completions(request: Request) -> Union[JSONResponse, dict[str, Any]]: 
 
         # CPU 全流程
         if decision.get("device") == "CPU":
-            result, decode_time, service_used, completion_id = await _cpu_completion(data, adaptive_decoder, decision)
+            result, decode_time, service_used, completion_id = await _cpu_completion(
+                data, adaptive_decoder, decision
+            )
         else:
             # 系统繁忙
-            return JSONResponse(content={"error": "系统繁忙，请稍后再试"}, status_code=503)
+            return JSONResponse(
+                content={"error": "系统繁忙，请稍后再试"}, status_code=503
+            )
 
         # 记录完成日志
-        Logger.info(f"请求 {completion_id} 完成，decode耗时={decode_time:.3f}秒，服务序列={service_used}")
+        Logger.info(
+            f"请求 {completion_id} 完成，decode耗时={decode_time:.3f}秒，服务序列={service_used}"
+        )
 
         # 添加性能指标
         if "usage" not in result:
@@ -135,7 +145,7 @@ async def completions(request: Request) -> Union[JSONResponse, dict[str, Any]]: 
 
 # 添加一个新的端点，用于测试自定义解码序列（主要用于测试）
 @router.post("/v1/test/decode_sequence", response_model=None)
-async def test_decode_sequence(request: Request) -> Union[JSONResponse, dict[str, Any]]:  # noqa: UP007
+async def test_decode_sequence(request: Request) -> Union[JSONResponse, dict[str, Any]]:
     """
     执行解码测试：GPU prefill + CPU decode
 
@@ -166,11 +176,15 @@ async def test_decode_sequence(request: Request) -> Union[JSONResponse, dict[str
         max_tokens = data.get("max_tokens", adaptive_decoder.default_max_tokens)
         initial_decision = {"device": "CPU", "token_limit": max_tokens + 1}
         decode_data = data.copy()
-        decode_result = await adaptive_decoder.decode_request(decode_data, completion_id, initial_decision)
+        decode_result = await adaptive_decoder.decode_request(
+            decode_data, completion_id, initial_decision
+        )
         # 提取最后一次 decode 的原始 response
         result = decode_result["result"]["response"]
         decode_time = decode_result["decode_time"]
-        service_used = [step.get("service_type") for step in decode_result.get("decode_results", [])]
+        service_used = [
+            step.get("service_type") for step in decode_result.get("decode_results", [])
+        ]
 
         # 添加性能指标
         if "usage" not in result:
@@ -181,7 +195,9 @@ async def test_decode_sequence(request: Request) -> Union[JSONResponse, dict[str
             "service_used": service_used,
         }
 
-        Logger.info(f"解码序列测试完成: 服务序列={service_used}, 耗时={decode_time:.3f}秒")
+        Logger.info(
+            f"解码序列测试完成: 服务序列={service_used}, 耗时={decode_time:.3f}秒"
+        )
 
     except json.JSONDecodeError:
         raise_http_exception(400, "无效的JSON")
@@ -196,7 +212,7 @@ async def test_decode_sequence(request: Request) -> Union[JSONResponse, dict[str
 
 
 @router.get("/metrics", response_model=None)
-async def get_metrics(request: Request) -> Union[JSONResponse, dict[str, Any]]:  # noqa: UP007
+async def get_metrics(request: Request) -> Union[JSONResponse, dict[str, Any]]:
     """返回当前的资源指标"""
     system_monitor = request.app.state.monitor
     if system_monitor is None:
@@ -231,7 +247,9 @@ async def get_metrics(request: Request) -> Union[JSONResponse, dict[str, Any]]: 
                 "generation_throughput": f"{cpu_metrics['generation_throughput']:.2f} tokens/s",
             },
             "system": {
-                "last_update": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(system_monitor.last_update_time)),
+                "last_update": time.strftime(
+                    "%Y-%m-%d %H:%M:%S", time.localtime(system_monitor.last_update_time)
+                ),
             },
         },
         # 设置缩进使JSON输出格式化
