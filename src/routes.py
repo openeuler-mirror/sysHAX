@@ -20,10 +20,12 @@ import time
 from typing import Any, NoReturn, Union
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from src.utils.logger import Logger
 from src.workflow import AdaptiveDecoderError
+import httpx
+from src.utils.config import GPU_HOST, GPU_PORT
 
 # 创建路由器
 router = APIRouter()
@@ -135,4 +137,27 @@ async def get_metrics(request: Request) -> Union[JSONResponse, dict[str, Any]]:
         },
         # 设置缩进使JSON输出格式化
         media_type="application/json",
+    )
+
+
+@router.api_route(
+    "/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+)
+async def fallback_to_gpu(request: Request, full_path: str) -> Response:
+    """Fallback: 未识别接口时转发给 GPU 服务"""
+    url = f"http://{GPU_HOST}:{GPU_PORT}/{full_path}"
+    try:
+        body = await request.body()
+        headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
+        async with httpx.AsyncClient() as client:
+            resp = await client.request(
+                request.method, url, headers=headers, content=body, timeout=300
+            )
+    except httpx.RequestError as e:
+        Logger.error(f"转发到 GPU 服务失败: {e!s}")
+        raise HTTPException(status_code=502, detail="GPU 服务不可用")
+    if resp.status_code == 404:
+        raise HTTPException(status_code=404, detail="接口不存在")
+    return Response(
+        content=resp.content, status_code=resp.status_code, headers=resp.headers
     )
