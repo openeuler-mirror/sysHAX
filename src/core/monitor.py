@@ -18,7 +18,7 @@ import time
 
 import httpx
 
-from src.utils.config import CPU_METRICS_URL, GPU_METRICS_URL, MONITOR_INTERVAL
+from src.utils.config import GPU_HOST, GPU_PORT, CPU_HOST, CPU_PORT, MONITOR_INTERVAL
 from src.utils.logger import Logger
 
 # Prometheus指标正则匹配模式
@@ -198,16 +198,14 @@ class SystemMonitor:
     2. 提供统一的接口获取所有指标
     """
 
-    def __init__(
-        self,
-        gpu_metrics_url: str = GPU_METRICS_URL,
-        cpu_metrics_url: str = CPU_METRICS_URL,
-    ) -> None:
-        """初始化系统监控器"""
+    def __init__(self) -> None:
+        """初始化系统监控器：根据配置拼接 metrics URL"""
+        # 构建 GPU/CPU metrics URL
+        gpu_metrics_url = f"http://{GPU_HOST}:{GPU_PORT}/metrics"
+        cpu_metrics_url = f"http://{CPU_HOST}:{CPU_PORT}/metrics"
         self.gpu_monitor = ResourceMonitor(gpu_metrics_url, service_name="GPU")
         self.cpu_monitor = ResourceMonitor(cpu_metrics_url, service_name="CPU")
         self.last_update_time = 0.0
-
         Logger.info("系统监控器初始化完成")
 
     async def update_metrics(self, *, force: bool = False) -> tuple[bool, bool]:
