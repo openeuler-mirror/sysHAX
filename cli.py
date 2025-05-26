@@ -28,11 +28,13 @@ from urllib.parse import urlparse, urlunparse
 import yaml
 
 from src.utils.config import (
-    CPU_URL,
-    DEFAULT_MAX_TOKENS,
+    GPU_HOST,
+    GPU_PORT,
+    CPU_HOST,
+    CPU_PORT,
     DEFAULT_MODEL,
+    DEFAULT_MAX_TOKENS,
     DEFAULT_TEMPERATURE,
-    GPU_URL,
     SYSHAX_HOST,
     SYSHAX_PORT,
     load_config,
@@ -103,8 +105,8 @@ def cmd_check_config() -> None:
 
 def cmd_interfaces() -> None:
     """返回 gpu, cpu, conductor 三个 URL"""
-    logger.info("gpu: %s", GPU_URL)
-    logger.info("cpu: %s", CPU_URL)
+    logger.info("gpu: http://%s:%s", GPU_HOST, GPU_PORT)
+    logger.info("cpu: http://%s:%s", CPU_HOST, CPU_PORT)
     logger.info("conductor: http://%s:%s", SYSHAX_HOST, SYSHAX_PORT)
 
 
@@ -158,15 +160,10 @@ def _write_cfg(path: Path, cfg: dict[str, Any], key: str, value: str) -> None:
 
 def _update_gpu(cfg: dict[str, Any], sub: str, value: str) -> None:
     """更新 GPU 配置"""
-    url = cfg["services"]["gpu"]["url"]
-    murl = cfg["services"]["gpu"]["metrics_url"]
     if sub == "host":
-        cfg["services"]["gpu"]["url"] = update_url_host_port(url, host=value)
-        cfg["services"]["gpu"]["metrics_url"] = update_url_host_port(murl, host=value)
+        cfg["services"]["gpu"]["host"] = value
     elif sub == "port":
-        p = int(value)
-        cfg["services"]["gpu"]["url"] = update_url_host_port(url, port=p)
-        cfg["services"]["gpu"]["metrics_url"] = update_url_host_port(murl, port=p)
+        cfg["services"]["gpu"]["port"] = int(value)
     else:
         logger.error("不支持的键: gpu.%s", sub)
         sys.exit(1)
@@ -174,15 +171,10 @@ def _update_gpu(cfg: dict[str, Any], sub: str, value: str) -> None:
 
 def _update_cpu(cfg: dict[str, Any], sub: str, value: str) -> None:
     """更新 CPU 配置"""
-    url = cfg["services"]["cpu"]["url"]
-    murl = cfg["services"]["cpu"]["metrics_url"]
     if sub == "host":
-        cfg["services"]["cpu"]["url"] = update_url_host_port(url, host=value)
-        cfg["services"]["cpu"]["metrics_url"] = update_url_host_port(murl, host=value)
+        cfg["services"]["cpu"]["host"] = value
     elif sub == "port":
-        p = int(value)
-        cfg["services"]["cpu"]["url"] = update_url_host_port(url, port=p)
-        cfg["services"]["cpu"]["metrics_url"] = update_url_host_port(murl, port=p)
+        cfg["services"]["cpu"]["port"] = int(value)
     else:
         logger.error("不支持的键: cpu.%s", sub)
         sys.exit(1)

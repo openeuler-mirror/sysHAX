@@ -48,11 +48,11 @@ CONFIG = load_config()
 
 # 常量赋值，如配置存在
 try:
-    # 服务URL配置
-    GPU_URL = CONFIG["services"]["gpu"]["url"]
-    CPU_URL = CONFIG["services"]["cpu"]["url"]
-    GPU_METRICS_URL = CONFIG["services"]["gpu"]["metrics_url"]
-    CPU_METRICS_URL = CONFIG["services"]["cpu"]["metrics_url"]
+    # 服务主机和端口配置（供 workflow 拼接 URL）
+    GPU_HOST = CONFIG["services"]["gpu"]["host"]
+    GPU_PORT = CONFIG["services"]["gpu"]["port"]
+    CPU_HOST = CONFIG["services"]["cpu"]["host"]
+    CPU_PORT = CONFIG["services"]["cpu"]["port"]
     SYSHAX_HOST = CONFIG["services"]["conductor"]["host"]
     SYSHAX_PORT = CONFIG["services"]["conductor"]["port"]
 
