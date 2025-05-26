@@ -61,7 +61,7 @@ async def completions(request: Request) -> JSONResponse:
     return JSONResponse(content=result)
 
 
-# 添加一个新的端点，用于测试自定义解码序列（主要用于测试）
+# 测试接口
 @router.post("/v1/test/decode_sequence", response_model=None)
 async def test_decode_sequence(request: Request) -> JSONResponse:
     """
