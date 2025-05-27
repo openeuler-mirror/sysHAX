@@ -25,7 +25,7 @@ from src import routes
 from src.core.benchmark import PerformanceTester
 from src.core.monitor import SystemMonitor
 from src.core.scheduler import Scheduler
-from src.utils.config import CPU_METRICS_URL, GPU_METRICS_URL, SYSHAX_HOST, SYSHAX_PORT
+from src.utils.config import SYSHAX_HOST, SYSHAX_PORT
 from src.utils.logger import Logger
 from src.workflow import AdaptiveDecoder, AdaptiveDecoderError
 
@@ -34,9 +34,7 @@ from src.workflow import AdaptiveDecoder, AdaptiveDecoderError
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """管理应用生命周期：初始化监控、调度器、解码器和性能测试，并在关闭时清理资源"""
     Path("logs").mkdir(parents=True, exist_ok=True)
-    app.state.monitor = SystemMonitor(
-        gpu_metrics_url=GPU_METRICS_URL, cpu_metrics_url=CPU_METRICS_URL
-    )
+    app.state.monitor = SystemMonitor()
     app.state.scheduler = Scheduler(system_monitor=app.state.monitor)
     app.state.adaptive_decoder = AdaptiveDecoder(
         system_monitor=app.state.monitor, scheduler=app.state.scheduler
