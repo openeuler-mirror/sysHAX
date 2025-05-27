@@ -10,7 +10,7 @@ IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FIT F
 PURPOSE.
 See the Mulan PSL v2 for more details.
 Created: 2025-05-23
-Desc:sysHAX 工作流模块
+Desc: sysHAX /v1/chat/completions 接口适配
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import httpx
 if TYPE_CHECKING:
     from src.core.monitor import SystemMonitor
     from src.core.scheduler import Scheduler
-from src.utils.config import CPU_URL, DEFAULT_MAX_TOKENS, GPU_URL
+from src.utils.config import GPU_HOST, GPU_PORT, CPU_HOST, CPU_PORT, DEFAULT_MAX_TOKENS
 from src.utils.logger import Logger
 
 
@@ -56,9 +56,63 @@ class AdaptiveDecoder:
         """初始化自适应解码器"""
         self.system_monitor: SystemMonitor = system_monitor
         self.scheduler: Scheduler = scheduler
-        self.prefill_url = GPU_URL
-        self.decode_url = CPU_URL
+
+        # 拼接 /v1/chat/completions 服务地址
+        self.v1_chat_gpu = f"http://{GPU_HOST}:{GPU_PORT}/v1/chat/completions"
+        self.v1_chat_cpu = f"http://{CPU_HOST}:{CPU_PORT}/v1/chat/completions"
+
         self.default_max_tokens = DEFAULT_MAX_TOKENS
+
+    # ===== 处理请求 =====
+    async def chat_completion(self, data: dict[str, Any]) -> dict[str, Any]:
+        """处理 /v1/chat/completions，动态调度"""
+        # 调度决策
+        decision = await self.scheduler.scheduler()
+        if decision.get("device") == "GPU":
+            # GPU 全流程
+            res = await self.default_request(data)
+            response = res["response"]
+            decode_time = res["decode_time"]
+            service_used = [res.get("service_type", "GPU")]
+        else:
+            # PD 分离
+            prefill = await self.prefill_request(data.copy())
+            completion_id = prefill["completion_id"]
+            decode = await self.decode_request(data.copy(), completion_id, decision)
+            response = decode["result"]["response"]
+            decode_time = decode["decode_time"]
+            service_used = [
+                step.get("service_type") for step in decode.get("decode_results", [])
+            ]
+        # 构建结果
+        if "usage" not in response:
+            response["usage"] = {}
+        response["conductor_metrics"] = {
+            "decode_time_ms": int(decode_time * 1000),
+            "service_used": service_used,
+        }
+        return response
+
+    async def test_completion_sequence(self, data: dict[str, Any]) -> dict[str, Any]:
+        """处理 /v1/test/decode_sequence，强制 GPU prefill + CPU decode"""
+        # 强制 PD 分离
+        prefill = await self.prefill_request(data.copy())
+        completion_id = prefill["completion_id"]
+        max_tokens = data.get("max_tokens", self.default_max_tokens)
+        initial_decision = {"device": "CPU", "token_limit": max_tokens + 1}
+        decode = await self.decode_request(data.copy(), completion_id, initial_decision)
+        response = decode["result"]["response"]
+        decode_time = decode["decode_time"]
+        service_used = [
+            step.get("service_type") for step in decode.get("decode_results", [])
+        ]
+        if "usage" not in response:
+            response["usage"] = {}
+        response["conductor_metrics"] = {
+            "decode_time_ms": int(decode_time * 1000),
+            "service_used": service_used,
+        }
+        return response
 
     # ===== 核心对外API =====
     async def default_request(self, data: dict[str, Any]) -> dict:
@@ -67,7 +121,7 @@ class AdaptiveDecoder:
         # 直接将原始请求转发到 GPU 服务
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                self.prefill_url,
+                self.v1_chat_gpu,
                 headers={"Content-Type": "application/json"},
                 json=data,
                 timeout=300,
@@ -105,7 +159,7 @@ class AdaptiveDecoder:
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.post(
-                    self.prefill_url,
+                    self.v1_chat_gpu,
                     headers={"Content-Type": "application/json"},
                     json=prefill_data,
                     timeout=300,
@@ -206,7 +260,7 @@ class AdaptiveDecoder:
         self, decode_data: dict[str, Any], device_type: str
     ) -> dict[str, Any]:
         """执行单步解码：根据 device_type 发送请求，返回解码结果、生成文本和 token 数"""
-        service_url = self.prefill_url if device_type == "GPU" else self.decode_url
+        service_url = self.v1_chat_gpu if device_type == "GPU" else self.v1_chat_cpu
         start_time = time.time()
         async with httpx.AsyncClient() as client:
             response = await client.post(
