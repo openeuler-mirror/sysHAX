@@ -95,11 +95,14 @@ def cmd_check_config() -> None:
     try:
         _ = load_config()
         logger.info("配置文件合法")
-    except AssertionError:
-        logger.exception("配置文件不存在")
+    except FileNotFoundError as e:
+        logger.error("配置文件不存在: %s", e)
         sys.exit(1)
-    except Exception:
-        logger.exception("配置文件不合法")
+    except yaml.YAMLError as e:
+        logger.error("配置文件解析失败: %s", e)
+        sys.exit(1)
+    except Exception as e:
+        logger.error("配置文件不合法: %s", e)
         sys.exit(1)
 
 

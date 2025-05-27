@@ -34,13 +34,20 @@ def load_config() -> dict[str, Any]:
         with primary.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
             return data or {}
-    except (OSError, yaml.YAMLError, FileNotFoundError):
-        Logger.warning("请配置 config/config.yaml 文件")
+    except (OSError, FileNotFoundError):
+        # 配置文件不存在或无法打开，尝试使用示例配置
+        Logger.warning("请配置 config/config.yaml 文件，使用示例配置启动")
         fallback = base / "config.example.yaml"
-        assert fallback.exists(), "未检测到 config/config.example.yaml 文件"
+        if not fallback.exists():
+            # 示例配置也不存在，抛出文件未找到错误
+            raise FileNotFoundError("未检测到 config/config.example.yaml 文件")
+        # 加载示例配置
         with fallback.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
             return data or {}
+    except yaml.YAMLError as e:
+        # YAML 解析错误
+        raise yaml.YAMLError(f"配置文件解析失败: {e}")
 
 
 # 加载配置
