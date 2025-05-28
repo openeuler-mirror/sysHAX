@@ -23,7 +23,7 @@ import httpx
 if TYPE_CHECKING:
     from src.core.monitor import SystemMonitor
     from src.core.scheduler import Scheduler
-from src.utils.config import GPU_HOST, GPU_PORT, CPU_HOST, CPU_PORT, DEFAULT_MAX_TOKENS
+from src.utils.config import CPU_HOST, CPU_PORT, DEFAULT_MAX_TOKENS, GPU_HOST, GPU_PORT
 from src.utils.logger import Logger
 
 
@@ -129,7 +129,7 @@ class AdaptiveDecoder:
         decode_time = time.time() - start_time
         if response.status_code != httpx.codes.OK:
             _raise_error(
-                f"默认请求失败: HTTP {response.status_code}, 响应: {response.text}"
+                f"默认请求失败: HTTP {response.status_code}, 响应: {response.text}",
             )
         json_response = response.json()
         return {
@@ -167,7 +167,7 @@ class AdaptiveDecoder:
 
                 if response.status_code != httpx.codes.OK:
                     _raise_error(
-                        f"Prefill请求失败: HTTP {response.status_code}, 响应: {response.text}"
+                        f"Prefill请求失败: HTTP {response.status_code}, 响应: {response.text}",
                     )
 
                 prefill_time = time.time() - start_time
@@ -179,7 +179,7 @@ class AdaptiveDecoder:
                     _raise_error("Prefill响应缺少completion ID")
                 else:
                     Logger.info(
-                        f"Prefill完成: 耗时={prefill_time:.3f}秒, completion_id={completion_id}"
+                        f"Prefill完成: 耗时={prefill_time:.3f}秒, completion_id={completion_id}",
                     )
                     # 仅返回生成的 request ID
                     return {
@@ -192,12 +192,12 @@ class AdaptiveDecoder:
                 _raise_error(f"Prefill请求异常: {e!s}", e)
 
     async def decode_request(
-        self, decode_data: dict[str, Any], completion_id: str, decision: dict[str, Any]
+        self, decode_data: dict[str, Any], completion_id: str, decision: dict[str, Any],
     ) -> dict:
         """执行解码请求，实现自适应解码，直到 finish_reason 不为 'scheduled'"""
         start_time = time.time()
         Logger.info(
-            f"开始动态解码请求：max_tokens={decode_data.get('max_tokens', self.default_max_tokens)}"
+            f"开始动态解码请求：max_tokens={decode_data.get('max_tokens', self.default_max_tokens)}",
         )
 
         decode_results = []
@@ -215,7 +215,7 @@ class AdaptiveDecoder:
                 device = "GPU"
                 token_limit = max_tokens + 1
             Logger.info(
-                f"调度决策：使用{device}解码，token限制={token_limit or '不限'}"
+                f"调度决策：使用{device}解码，token限制={token_limit or '不限'}",
             )
 
             # 构造本轮请求数据
@@ -238,7 +238,7 @@ class AdaptiveDecoder:
             decode_results.append(step_res)
             last_generated_text = step_res.get("generated_text", "")
             Logger.info(
-                f"{device} 解码完成: finish_reason={finish_reason}, 本次生成tokens={new_token_count}"
+                f"{device} 解码完成: finish_reason={finish_reason}, 本次生成tokens={new_token_count}",
             )
             # 更新剩余 max_tokens 以供下一轮
             total_tokens_generated += new_token_count
@@ -261,7 +261,7 @@ class AdaptiveDecoder:
 
     # ===== 解码器基础实现 =====
     async def _execute_decode_step(
-        self, decode_data: dict[str, Any], device_type: str
+        self, decode_data: dict[str, Any], device_type: str,
     ) -> dict[str, Any]:
         """执行单步解码：根据 device_type 发送请求，返回解码结果、生成文本和 token 数"""
         service_url = self.v1_chat_gpu if device_type == "GPU" else self.v1_chat_cpu
@@ -276,7 +276,7 @@ class AdaptiveDecoder:
         decode_time = time.time() - start_time
         if response.status_code != httpx.codes.OK:
             _raise_error(
-                f"{device_type} 解码请求失败: HTTP {response.status_code}, 响应: {response.text}"
+                f"{device_type} 解码请求失败: HTTP {response.status_code}, 响应: {response.text}",
             )
         resp_json = response.json()
         # 提取请求id
@@ -290,7 +290,7 @@ class AdaptiveDecoder:
         # 提取新生成 token 数
         new_token_count = resp_json.get("usage", {}).get("completion_tokens", 0)
         Logger.info(
-            f"{device_type} 解码完成: 耗时={decode_time:.3f}秒, 生成{new_token_count}个tokens"
+            f"{device_type} 解码完成: 耗时={decode_time:.3f}秒, 生成{new_token_count}个tokens",
         )
         return {
             "request_id": request_id,

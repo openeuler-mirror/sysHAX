@@ -22,19 +22,19 @@ import logging
 import shutil
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 from urllib.parse import urlparse, urlunparse
 
 import yaml
 
 from src.utils.config import (
-    GPU_HOST,
-    GPU_PORT,
     CPU_HOST,
     CPU_PORT,
-    DEFAULT_MODEL,
     DEFAULT_MAX_TOKENS,
+    DEFAULT_MODEL,
     DEFAULT_TEMPERATURE,
+    GPU_HOST,
+    GPU_PORT,
     SYSHAX_HOST,
     SYSHAX_PORT,
     load_config,
@@ -95,14 +95,14 @@ def cmd_check_config() -> None:
     try:
         _ = load_config()
         logger.info("配置文件合法")
-    except FileNotFoundError as e:
-        logger.error("配置文件不存在: %s", e)
+    except FileNotFoundError:
+        logger.exception("配置文件不存在")
         sys.exit(1)
-    except yaml.YAMLError as e:
-        logger.error("配置文件解析失败: %s", e)
+    except yaml.YAMLError:
+        logger.exception("配置文件解析失败")
         sys.exit(1)
-    except Exception as e:
-        logger.error("配置文件不合法: %s", e)
+    except Exception:
+        logger.exception("配置文件不合法")
         sys.exit(1)
 
 
@@ -120,9 +120,7 @@ def cmd_model() -> None:
     logger.info("temperature: %s", DEFAULT_TEMPERATURE)
 
 
-def update_url_host_port(
-    url: str, host: str | None = None, port: int | None = None
-) -> str:
+def update_url_host_port(url: str, host: Optional[str] = None, port: Optional[int] = None) -> str:
     """更新 URL 中的 host 或 port，并保留原始占位符"""
     p = urlparse(url)
     orig_netloc = p.netloc
@@ -152,9 +150,7 @@ def _load_cfg(path: Path) -> dict[str, Any]:
 def _write_cfg(path: Path, cfg: dict[str, Any], key: str, value: str) -> None:
     """写入配置文件"""
     try:
-        path.write_text(
-            yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8"
-        )
+        path.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
         logger.info("已设置 %s 为 %s", key, value)
     except OSError:
         logger.exception("写入配置失败")

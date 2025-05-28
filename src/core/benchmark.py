@@ -72,7 +72,7 @@ class PerformanceTester:
             await asyncio.sleep(3)
             gpu_tp = await self._check_throughput("gpu", gpu_res)
             Logger.info(
-                f"GPU性能测试: 耗时={gpu_time:.3f}s, 吞吐量={gpu_tp:.2f}tokens/s"
+                f"GPU性能测试: 耗时={gpu_time:.3f}s, 吞吐量={gpu_tp:.2f}tokens/s",
             )
 
             # 2. CPU 测试（prefill_request + decode_request）
@@ -83,22 +83,22 @@ class PerformanceTester:
 
             decision = {"device": "CPU", "token_limit": max_tokens + 1}
             cpu_res = await self.adaptive_decoder.decode_request(
-                test_data, completion_id, decision
+                test_data, completion_id, decision,
             )
             cpu_time = cpu_res.get("decode_time", 0.0)
             await asyncio.sleep(3)
             cpu_tp = await self._check_throughput("cpu", cpu_res)
             Logger.info(
-                f"CPU性能测试: 耗时={cpu_time:.3f}s, 吞吐量={cpu_tp:.2f}tokens/s"
+                f"CPU性能测试: 耗时={cpu_time:.3f}s, 吞吐量={cpu_tp:.2f}tokens/s",
             )
 
             # 保存结果并计算比率
             self._save_performance_results(
-                gpu_time * 1000, gpu_tp, cpu_time * 1000, cpu_tp
+                gpu_time * 1000, gpu_tp, cpu_time * 1000, cpu_tp,
             )
             summary = self.get_performance_summary()
             Logger.info(
-                f"基准测试完成: GPU/CPU 性能比={summary.get('performance_ratio', 0):.2f}x"
+                f"基准测试完成: GPU/CPU 性能比={summary.get('performance_ratio', 0):.2f}x",
             )
         except (ValueError, KeyError) as e:
             Logger.error(f"基准测试失败: {e!s}")
@@ -125,7 +125,7 @@ class PerformanceTester:
             }
 
             Logger.info(
-                f"准备好decode数据，model={self.model_name}, max_tokens={self.test_tokens}"
+                f"准备好decode数据，model={self.model_name}, max_tokens={self.test_tokens}",
             )
         except (KeyError, TypeError) as e:
             Logger.error(f"准备测试数据失败: {e}", exc_info=True)

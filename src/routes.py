@@ -19,13 +19,13 @@ import json
 import time
 from typing import Any, NoReturn, Union
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
+from src.utils.config import GPU_HOST, GPU_PORT
 from src.utils.logger import Logger
 from src.workflow import AdaptiveDecoderError
-import httpx
-from src.utils.config import GPU_HOST, GPU_PORT
 
 # 创建路由器
 router = APIRouter()
@@ -57,7 +57,7 @@ async def completions(request: Request) -> JSONResponse:
     except AdaptiveDecoderError as e:
         Logger.error(f"自适应解码器异常: {e!s}", exc_info=True)
         raise_http_exception(500, f"解码器内部错误: {e!s}")
-    except Exception as e:
+    except (httpx.RequestError, ValueError, KeyError, AttributeError) as e:
         Logger.error(f"处理请求出错: {e!s}", exc_info=True)
         raise_http_exception(500, f"内部服务器错误: {e!s}")
     return JSONResponse(content=result)
@@ -88,7 +88,7 @@ async def test_decode_sequence(request: Request) -> JSONResponse:
     except AdaptiveDecoderError as e:
         Logger.error(f"自适应解码器异常: {e!s}", exc_info=True)
         raise_http_exception(500, f"解码器内部错误: {e!s}")
-    except Exception as e:
+    except (httpx.RequestError, ValueError, KeyError, AttributeError) as e:
         Logger.error(f"解码序列测试出错: {e!s}", exc_info=True)
         raise_http_exception(500, f"内部服务器错误: {e!s}")
     return JSONResponse(content=result)
@@ -130,9 +130,7 @@ async def get_metrics(request: Request) -> Union[JSONResponse, dict[str, Any]]:
                 "generation_throughput": f"{cpu_metrics['generation_throughput']:.2f} tokens/s",
             },
             "system": {
-                "last_update": time.strftime(
-                    "%Y-%m-%d %H:%M:%S", time.localtime(system_monitor.last_update_time)
-                ),
+                "last_update": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(system_monitor.last_update_time)),
             },
         },
         # 设置缩进使JSON输出格式化
@@ -140,9 +138,7 @@ async def get_metrics(request: Request) -> Union[JSONResponse, dict[str, Any]]:
     )
 
 
-@router.api_route(
-    "/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
-)
+@router.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
 async def fallback_to_gpu(request: Request, full_path: str) -> Response:
     """Fallback: 未识别接口时转发给 GPU 服务"""
     url = f"http://{GPU_HOST}:{GPU_PORT}/{full_path}"
@@ -150,14 +146,10 @@ async def fallback_to_gpu(request: Request, full_path: str) -> Response:
         body = await request.body()
         headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
         async with httpx.AsyncClient() as client:
-            resp = await client.request(
-                request.method, url, headers=headers, content=body, timeout=300
-            )
+            resp = await client.request(request.method, url, headers=headers, content=body, timeout=300)
     except httpx.RequestError as e:
         Logger.error(f"转发到 GPU 服务失败: {e!s}")
-        raise HTTPException(status_code=502, detail="GPU 服务不可用")
-    if resp.status_code == 404:
-        raise HTTPException(status_code=404, detail="接口不存在")
-    return Response(
-        content=resp.content, status_code=resp.status_code, headers=resp.headers
-    )
+        raise HTTPException(status_code=502, detail="GPU 服务不可用") from e
+    if resp.status_code == httpx.codes.NOT_FOUND:
+        raise HTTPException(status_code=httpx.codes.NOT_FOUND, detail="接口不存在")
+    return Response(content=resp.content, status_code=resp.status_code, headers=resp.headers)

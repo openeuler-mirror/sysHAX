@@ -62,7 +62,7 @@ class Logger:
             encoding="UTF-8",
         )
         file_formatter = logging.Formatter(
-            fmt="%(asctime)s - %(levelname)s - %(message)s"
+            fmt="%(asctime)s - %(levelname)s - %(message)s",
         )
         file_handler.setFormatter(file_formatter)
         file_handler.setLevel(logging.INFO)
@@ -71,7 +71,7 @@ class Logger:
         # 添加控制台处理器 - 默认WARNING级别，只显示警告和错误
         console_handler = logging.StreamHandler()
         console_formatter = logging.Formatter(
-            fmt="%(asctime)s - %(levelname)s - %(message)s"
+            fmt="%(asctime)s - %(levelname)s - %(message)s",
         )
         console_handler.setFormatter(console_formatter)
         console_handler.setLevel(logging.WARNING)
@@ -124,7 +124,7 @@ class Logger:
         cls.logger.setLevel(level)
         for handler in cls.logger.handlers:
             if isinstance(handler, logging.StreamHandler) and not isinstance(
-                handler, logging.FileHandler
+                handler, logging.FileHandler,
             ):
                 # 只修改控制台处理器的级别
                 handler.setLevel(level)

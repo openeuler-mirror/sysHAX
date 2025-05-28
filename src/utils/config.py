@@ -39,15 +39,17 @@ def load_config() -> dict[str, Any]:
         Logger.warning("请配置 config/config.yaml 文件，使用示例配置启动")
         fallback = base / "config.example.yaml"
         if not fallback.exists():
-            # 示例配置也不存在，抛出文件未找到错误
-            raise FileNotFoundError("未检测到 config/config.example.yaml 文件")
+            # 示例配置也不存在，抛出文件未检测到错误
+            msg = "未检测到 config/config.example.yaml 文件"
+            raise FileNotFoundError(msg) from None
         # 加载示例配置
         with fallback.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
             return data or {}
     except yaml.YAMLError as e:
         # YAML 解析错误
-        raise yaml.YAMLError(f"配置文件解析失败: {e}")
+        msg = f"配置文件解析失败: {e}"
+        raise yaml.YAMLError(msg) from e
 
 
 # 加载配置

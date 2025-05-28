@@ -80,7 +80,7 @@ class Scheduler:
                 token_limit = self._calculate_token_limit(cpu_throughput)
                 decision["token_limit"] = token_limit
                 Logger.info(
-                    f"GPU缓存使用率过高({gpu_cache_usage:.1f}%)，任务转移到CPU，token限制: {token_limit}"
+                    f"GPU缓存使用率过高({gpu_cache_usage:.1f}%)，任务转移到CPU，token限制: {token_limit}",
                 )
 
         Logger.info(f"调度决策: {decision}")
