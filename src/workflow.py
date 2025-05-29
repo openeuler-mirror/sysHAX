@@ -21,8 +21,11 @@ from typing import TYPE_CHECKING, Any, NoReturn
 import httpx
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
     from src.core.monitor import SystemMonitor
     from src.core.scheduler import Scheduler
+
 from src.utils.config import CPU_HOST, CPU_PORT, DEFAULT_MAX_TOKENS, GPU_HOST, GPU_PORT
 from src.utils.logger import Logger
 
@@ -63,7 +66,7 @@ class AdaptiveDecoder:
 
         self.default_max_tokens = DEFAULT_MAX_TOKENS
 
-    # ===== 处理请求 =====
+    # ===== 主流程接口 =====
     async def chat_completion(self, data: dict[str, Any]) -> dict[str, Any]:
         """处理 /v1/chat/completions，动态调度"""
         # 调度决策
@@ -81,9 +84,7 @@ class AdaptiveDecoder:
             decode = await self.decode_request(data.copy(), completion_id, decision)
             response = decode["result"]["response"]
             decode_time = decode["decode_time"]
-            service_used = [
-                step.get("service_type") for step in decode.get("decode_results", [])
-            ]
+            service_used = [step.get("service_type") for step in decode.get("decode_results", [])]
         # 构建结果
         if "usage" not in response:
             response["usage"] = {}
@@ -94,24 +95,91 @@ class AdaptiveDecoder:
         return response
 
     async def test_completion_sequence(self, data: dict[str, Any]) -> dict[str, Any]:
-        """处理 /v1/test/decode_sequence，强制 GPU prefill + CPU decode"""
-        # 强制 PD 分离
+        """处理 /v1/test/decode_sequence，根据sequence字段顺序进行PD分离"""
+        sequence = data.get("sequence", [("GPU", 0)])
+
+        # 如果序列为空或第一个是GPU且token_limit为0，使用默认请求
+        if not sequence or (sequence[0][0] == "GPU" and sequence[0][1] == 0):
+            return await self.default_request(data)
+
+        # 执行 prefill
         prefill = await self.prefill_request(data.copy())
         completion_id = prefill["completion_id"]
         max_tokens = data.get("max_tokens", self.default_max_tokens)
-        initial_decision = {"device": "CPU", "token_limit": max_tokens + 1}
-        decode = await self.decode_request(data.copy(), completion_id, initial_decision)
-        response = decode["result"]["response"]
-        decode_time = decode["decode_time"]
-        service_used = [
-            step.get("service_type") for step in decode.get("decode_results", [])
-        ]
+
+        # 按序列顺序执行解码
+        decode_results = []
+        total_tokens_generated = 0
+        last_generated_text = ""
+        finish_reason = "scheduled"
+        remaining_max_tokens = max_tokens
+
+        start_time = time.time()
+
+        for device, token_limit in sequence:
+            if finish_reason != "scheduled":
+                break
+
+            # 如果token_limit为0，使用剩余的所有tokens，否则确保不超过剩余的max_tokens
+            actual_token_limit = (
+                remaining_max_tokens + 1 if token_limit == 0 else min(token_limit, remaining_max_tokens)
+            )
+
+            if actual_token_limit <= 0:
+                break
+
+            Logger.info(f"序列解码: 使用{device}解码，token限制={actual_token_limit}")
+
+            # 构造解码请求数据
+            decode_data = data.copy()
+            decode_data["request_id_inference"] = completion_id
+            decode_data["num_decode_tokens"] = actual_token_limit
+            decode_data["generated_text"] = last_generated_text
+            decode_data["max_tokens"] = actual_token_limit
+
+            try:
+                step_res = await self._execute_decode_step(decode_data, device)
+                completion_id = step_res.get("request_id", completion_id)
+                new_token_count = step_res.get("new_token_count", 0)
+                finish_reason = step_res.get("finish_reason", "scheduled")
+                last_generated_text = step_res.get("generated_text", last_generated_text)
+
+                decode_results.append(step_res)
+                total_tokens_generated += new_token_count
+                remaining_max_tokens -= new_token_count
+
+                Logger.info(f"{device} 解码完成: finish_reason={finish_reason}, 生成tokens={new_token_count}")
+
+                # 如果已经完成或没有剩余tokens，退出循环
+                if finish_reason != "scheduled" or remaining_max_tokens <= 0:
+                    break
+
+            except (AdaptiveDecoderError, httpx.RequestError, ValueError) as e:
+                Logger.error(f"{device} 解码请求异常: {e!s}", exc_info=True)
+                if not decode_results:
+                    _raise_error(f"首次解码失败，无法继续: {e!s}", e)
+                break
+
+        decode_time = time.time() - start_time
+
+        # 构建最终响应
+        if decode_results:
+            response = decode_results[-1]["response"]
+            service_used = [step.get("service_type") for step in decode_results]
+        else:
+            response = {}
+            service_used = []
+
         if "usage" not in response:
             response["usage"] = {}
+
         response["conductor_metrics"] = {
             "decode_time_ms": int(decode_time * 1000),
             "service_used": service_used,
+            "total_tokens_generated": total_tokens_generated,
+            "sequence_steps": len(decode_results),
         }
+
         return response
 
     # ===== 核心对外API =====
@@ -137,6 +205,26 @@ class AdaptiveDecoder:
             "decode_time": decode_time,
             "service_type": "GPU",
         }
+
+    # 添加流式默认请求方法
+    async def default_request_stream(self, data: dict[str, Any]) -> AsyncGenerator[bytes, None]:
+        """执行默认 GPU 全流程的流式请求，返回字节流生成器"""
+        async with httpx.AsyncClient() as client, client.stream(
+            "POST",
+            self.v1_chat_gpu,
+            headers={"Content-Type": "application/json"},
+            json=data,
+            timeout=300,
+        ) as response:
+            if response.status_code != httpx.codes.OK:
+                # 读取完整响应内容以记录错误
+                text = await response.aread()
+                _raise_error(
+                    f"默认流式请求失败: HTTP {response.status_code}, 响应: {text.decode()}",
+                )
+            # 异步迭代并返回原始字节块
+            async for chunk in response.aiter_bytes():
+                yield chunk
 
     async def prefill_request(self, data: dict[str, Any]) -> dict:
         """
@@ -192,7 +280,10 @@ class AdaptiveDecoder:
                 _raise_error(f"Prefill请求异常: {e!s}", e)
 
     async def decode_request(
-        self, decode_data: dict[str, Any], completion_id: str, decision: dict[str, Any],
+        self,
+        decode_data: dict[str, Any],
+        completion_id: str,
+        decision: dict[str, Any],
     ) -> dict:
         """执行解码请求，实现自适应解码，直到 finish_reason 不为 'scheduled'"""
         start_time = time.time()
@@ -261,7 +352,9 @@ class AdaptiveDecoder:
 
     # ===== 解码器基础实现 =====
     async def _execute_decode_step(
-        self, decode_data: dict[str, Any], device_type: str,
+        self,
+        decode_data: dict[str, Any],
+        device_type: str,
     ) -> dict[str, Any]:
         """执行单步解码：根据 device_type 发送请求，返回解码结果、生成文本和 token 数"""
         service_url = self.v1_chat_gpu if device_type == "GPU" else self.v1_chat_cpu
@@ -301,3 +394,64 @@ class AdaptiveDecoder:
             "decode_time": decode_time,
             "response": resp_json,
         }
+
+    # 添加单步解码流式请求方法
+    async def _execute_decode_step_stream(
+        self,
+        decode_data: dict[str, Any],
+        device_type: str,
+    ) -> AsyncGenerator[bytes, None]:
+        """单步解码的流式请求"""
+        service_url = self.v1_chat_gpu if device_type == "GPU" else self.v1_chat_cpu
+        async with httpx.AsyncClient() as client, client.stream(
+            "POST",
+            service_url,
+            headers={"Content-Type": "application/json"},
+            json=decode_data,
+            timeout=300,
+        ) as response:
+            if response.status_code != httpx.codes.OK:
+                text = await response.aread()
+                _raise_error(
+                    f"{device_type} 解码流式请求失败: HTTP {response.status_code}, 响应: {text.decode()}",
+                )
+            async for chunk in response.aiter_bytes():
+                yield chunk
+
+    async def chat_completion_stream(self, data: dict[str, Any]) -> AsyncGenerator[bytes, None]:
+        """流式处理 /v1/chat/completions，支持 PD 分离和 GPU 全流程"""
+        # 调度决策
+        decision = await self.scheduler.scheduler()
+        # GPU 全流程流式
+        if decision.get("device") == "GPU":
+            async for chunk in self.default_request_stream(data):
+                yield chunk
+            return
+        # PD 分离流式
+        # 1. Prefill 请求
+        prefill = await self.prefill_request(data.copy())
+        completion_id = prefill["completion_id"]
+        # 2. 动态解码流式
+        max_tokens = data.get("max_tokens", self.default_max_tokens)
+        last_generated = ""
+        finish_reason = "scheduled"
+        curr_decision = decision
+        remaining_max_tokens = max_tokens
+        while finish_reason == "scheduled" and remaining_max_tokens > 0:
+            device = curr_decision.get("device", "GPU")
+            token_limit = curr_decision.get("token_limit", 0)
+            if device == "GPU" or token_limit == 0:
+                device = "GPU"
+                token_limit = remaining_max_tokens + 1
+            actual_limit = min(token_limit, remaining_max_tokens)
+            # 构造流式解码请求数据
+            decode_data = data.copy()
+            decode_data["stream"] = True
+            decode_data["request_id_inference"] = completion_id
+            decode_data["generated_text"] = last_generated
+            decode_data["num_decode_tokens"] = actual_limit
+            # 执行流式解码
+            async for chunk in self._execute_decode_step_stream(decode_data, device):
+                yield chunk
+            # 当前实现只执行一次解码循环，更多循环需解析 finish_reason 并更新 curr_decision
+            break
