@@ -21,7 +21,7 @@ from typing import Any, NoReturn, Union
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from src.utils.config import GPU_HOST, GPU_PORT
 from src.utils.logger import Logger
@@ -51,6 +51,12 @@ async def completions(request: Request) -> JSONResponse:
 
     try:
         data: dict[str, Any] = await request.json()
+        # 支持流式 PD 分离和 GPU 全流程
+        if data.get("stream"):
+            return StreamingResponse(
+                adaptive_decoder.chat_completion_stream(data),
+                media_type="text/event-stream",
+            )
         result = await adaptive_decoder.chat_completion(data)
     except json.JSONDecodeError:
         raise_http_exception(400, "无效请求")
