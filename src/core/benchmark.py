@@ -69,7 +69,7 @@ class PerformanceTester:
             test_data["max_tokens"] = max_tokens * 10
             gpu_res = await self.adaptive_decoder.default_request(test_data)
             gpu_time = gpu_res.get("decode_time", 0.0)
-            await asyncio.sleep(3)
+            await asyncio.sleep(1)
             gpu_tp = await self._check_throughput("gpu", gpu_res)
             Logger.info(
                 f"GPU性能测试: 耗时={gpu_time:.3f}s, 吞吐量={gpu_tp:.2f}tokens/s",
@@ -86,7 +86,7 @@ class PerformanceTester:
                 test_data, completion_id, decision,
             )
             cpu_time = cpu_res.get("decode_time", 0.0)
-            await asyncio.sleep(3)
+            await asyncio.sleep(1)
             cpu_tp = await self._check_throughput("cpu", cpu_res)
             Logger.info(
                 f"CPU性能测试: 耗时={cpu_time:.3f}s, 吞吐量={cpu_tp:.2f}tokens/s",
