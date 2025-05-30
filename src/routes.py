@@ -37,7 +37,7 @@ def raise_http_exception(status_code: int, detail: str) -> NoReturn:
 
 
 @router.post("/v1/chat/completions", response_model=None)
-async def completions(request: Request) -> JSONResponse:
+async def completions(request: Request) -> Any:
     """
     处理完成请求
 
@@ -57,7 +57,7 @@ async def completions(request: Request) -> JSONResponse:
                 adaptive_decoder.chat_completion_stream(data),
                 media_type="text/event-stream",
             )
-        result = await adaptive_decoder.chat_completion(data)
+        return await adaptive_decoder.chat_completion(data)
     except json.JSONDecodeError:
         raise_http_exception(400, "无效请求")
     except AdaptiveDecoderError as e:
@@ -66,12 +66,11 @@ async def completions(request: Request) -> JSONResponse:
     except (httpx.RequestError, ValueError, KeyError, AttributeError) as e:
         Logger.error(f"处理请求出错: {e!s}", exc_info=True)
         raise_http_exception(500, f"内部服务器错误: {e!s}")
-    return JSONResponse(content=result)
 
 
 # 测试接口
 @router.post("/v1/test/decode_sequence", response_model=None)
-async def test_decode_sequence(request: Request) -> JSONResponse:
+async def test_decode_sequence(request: Request) -> Any:
     """
     执行解码测试：GPU prefill + CPU decode
 
@@ -88,16 +87,21 @@ async def test_decode_sequence(request: Request) -> JSONResponse:
 
     try:
         data: dict[str, Any] = await request.json()
-        result = await adaptive_decoder.test_completion_sequence(data)
+        # 支持流式 PD 分离和 GPU 全流程
+        if data.get("stream"):
+            return StreamingResponse(
+                adaptive_decoder.test_completion_stream(data),
+                media_type="text/event-stream",
+            )
+        return await adaptive_decoder.test_completion(data)
     except json.JSONDecodeError:
         raise_http_exception(400, "无效请求")
     except AdaptiveDecoderError as e:
         Logger.error(f"自适应解码器异常: {e!s}", exc_info=True)
         raise_http_exception(500, f"解码器内部错误: {e!s}")
     except (httpx.RequestError, ValueError, KeyError, AttributeError) as e:
-        Logger.error(f"解码序列测试出错: {e!s}", exc_info=True)
+        Logger.error(f"处理请求出错: {e!s}", exc_info=True)
         raise_http_exception(500, f"内部服务器错误: {e!s}")
-    return JSONResponse(content=result)
 
 
 @router.get("/metrics", response_model=None)
