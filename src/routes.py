@@ -63,6 +63,9 @@ async def completions(request: Request) -> Any:
     except AdaptiveDecoderError as e:
         Logger.error(f"自适应解码器异常: {e!s}", exc_info=True)
         raise_http_exception(500, f"解码器内部错误: {e!s}")
+    except httpx.TimeoutException as e:
+        Logger.error(f"请求超时: {e!s}", exc_info=True)
+        raise_http_exception(504, "请求超时")
     except (httpx.RequestError, ValueError, KeyError, AttributeError) as e:
         Logger.error(f"处理请求出错: {e!s}", exc_info=True)
         raise_http_exception(500, f"内部服务器错误: {e!s}")
@@ -99,6 +102,9 @@ async def test_decode_sequence(request: Request) -> Any:
     except AdaptiveDecoderError as e:
         Logger.error(f"自适应解码器异常: {e!s}", exc_info=True)
         raise_http_exception(500, f"解码器内部错误: {e!s}")
+    except httpx.TimeoutException as e:
+        Logger.error(f"请求超时: {e!s}", exc_info=True)
+        raise_http_exception(504, "请求超时")
     except (httpx.RequestError, ValueError, KeyError, AttributeError) as e:
         Logger.error(f"处理请求出错: {e!s}", exc_info=True)
         raise_http_exception(500, f"内部服务器错误: {e!s}")
@@ -157,6 +163,9 @@ async def fallback_to_gpu(request: Request, full_path: str) -> Response:
         headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
         async with httpx.AsyncClient() as client:
             resp = await client.request(request.method, url, headers=headers, content=body, timeout=300)
+    except httpx.TimeoutException as e:
+        Logger.error(f"转发到 GPU 服务超时: {e!s}", exc_info=True)
+        raise HTTPException(status_code=504, detail="GPU 服务请求超时") from e
     except httpx.RequestError as e:
         Logger.error(f"转发到 GPU 服务失败: {e!s}")
         raise HTTPException(status_code=502, detail="GPU 服务不可用") from e
