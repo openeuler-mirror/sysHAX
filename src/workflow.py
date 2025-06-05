@@ -203,6 +203,9 @@ class AdaptiveDecoder:
         finish_reason = "scheduled"
         curr_decision = decision
 
+        # 当前版本仅支持CPU完整decode
+        curr_decision = {"device": "CPU", "token_limit": max_tokens + 1}
+
         while finish_reason == "scheduled":
             device = curr_decision.get("device", "GPU")
             token_limit = curr_decision.get("token_limit", 0)
@@ -250,6 +253,9 @@ class AdaptiveDecoder:
         last_generated_text = ""
         finish_reason = "scheduled"
         curr_decision = decision
+
+        # 当前版本仅支持CPU完整decode
+        curr_decision = {"device": "CPU", "token_limit": max_tokens + 1}
 
         while finish_reason == "scheduled":
             # 调度决策
