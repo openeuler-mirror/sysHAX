@@ -77,6 +77,7 @@ try:
     DEFAULT_TEST_TOKENS = CONFIG["models"]["params"]["test_tokens"]
 
     # 调度决策器配置
+    MAX_NUM_SEQS = CONFIG["decider"]["max_num_seqs"]
     GPU_CACHE_THRESHOLD = CONFIG["decider"]["gpu_cache_threshold"]
     CPU_THROUGHPUT_THRESHOLD = CONFIG["decider"]["cpu_throughput_threshold"]
     TOKEN_LIMIT_MULTIPLIER = CONFIG["decider"]["token_limit_multiplier"]

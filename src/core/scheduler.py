@@ -17,6 +17,7 @@ from src.core.monitor import SystemMonitor
 from src.utils.config import (
     CPU_THROUGHPUT_THRESHOLD,
     GPU_CACHE_THRESHOLD,
+    MAX_NUM_SEQS,
     TOKEN_LIMIT_MAX,
     TOKEN_LIMIT_MIN,
     TOKEN_LIMIT_MULTIPLIER,
@@ -65,29 +66,50 @@ class Scheduler:
         gpu_cache_usage = gpu_metrics["gpu_cache_usage"] * 100  # 转换为百分比
         cpu_throughput = cpu_metrics["generation_throughput"]  # tokens/s
 
-        # 默认决策：使用GPU，无token限制
-        decision = {"device": "GPU", "token_limit": 0}
+        # GPU侧调度逻辑
+        gpu_running = gpu_metrics["num_running"]
+        gpu_waiting = gpu_metrics["num_waiting"]
+        cpu_running = cpu_metrics["num_running"]
 
-        # 检查GPU缓存使用率是否超过阈值
-        if gpu_cache_usage > GPU_CACHE_THRESHOLD:
-            # 如果CPU吞吐量小于阈值，停止接收新任务
-            if cpu_throughput < CPU_THROUGHPUT_THRESHOLD:
-                decision["device"] = None  # None表示系统繁忙
-                Logger.info("系统繁忙，停止接收新任务")
-            else:
-                # 否则将任务传输给CPU，设置token限制
-                decision["device"] = "CPU"
-                token_limit = self._calculate_token_limit(cpu_throughput)
-                decision["token_limit"] = token_limit
-                Logger.info(
-                    f"GPU缓存使用率过高({gpu_cache_usage:.1f}%)，任务转移到CPU，token限制: {token_limit}",
-                )
+        # 是否将任务转移到CPU
+        log_msg = ""
+        use_cpu = False
+        if MAX_NUM_SEQS is not None and gpu_running >= MAX_NUM_SEQS:
+            use_cpu = True
+            log_msg = f"GPU并发达到最大序列数({MAX_NUM_SEQS})，"
+        elif MAX_NUM_SEQS is None and gpu_running > 0 and gpu_waiting > 0:
+            use_cpu = True
+            log_msg = "GPU存在等待队列堵塞，"
+        elif gpu_cache_usage > GPU_CACHE_THRESHOLD:
+            use_cpu = True
+            log_msg = f"GPU缓存使用率过高({gpu_cache_usage:.1f}%)，"
 
+        # 如果GPU可用，则继续在GPU上执行
+        if not use_cpu:
+            decision = {"device": "GPU", "token_limit": 0}
+            Logger.info(f"调度决策: {decision}")
+            return decision
+
+        # CPU侧调度逻辑
+        if cpu_throughput < CPU_THROUGHPUT_THRESHOLD and cpu_running >= 1:
+            decision = {"device": None, "token_limit": 0}
+            log_msg += "CPU繁忙，停止接收新任务。"
+        elif cpu_throughput < CPU_THROUGHPUT_THRESHOLD:
+            decision = {"device": "CPU", "token_limit": self._calculate_token_limit(cpu_throughput)}
+            log_msg += "CPU性能较低，执行PD分离。"
+        elif cpu_running >= MAX_NUM_SEQS:
+            decision = {"device": None, "token_limit": 0}
+            log_msg += f"CPU达到最大并发序列数({MAX_NUM_SEQS})，停止接收新任务。"
+        else:
+            decision = {"device": "CPU", "token_limit": self._calculate_token_limit(cpu_throughput)}
+            log_msg += "执行PD分离。"
+
+        Logger.info(log_msg)
         Logger.info(f"调度决策: {decision}")
         return decision
 
     @staticmethod
     def _calculate_token_limit(cpu_throughput: float) -> int:
         """计算token限制"""
-        token = round(cpu_throughput * TOKEN_LIMIT_MULTIPLIER / 10) * 10
+        token = int(round(cpu_throughput * TOKEN_LIMIT_MULTIPLIER, -1))
         return min(max(token, TOKEN_LIMIT_MIN), TOKEN_LIMIT_MAX)

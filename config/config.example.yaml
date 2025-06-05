@@ -36,10 +36,12 @@ system:
   request_timeout: 600
 
 decider:
+  # 最大并发序列数
+  max_num_seqs: 256
   # GPU缓存使用率阈值
-  gpu_cache_threshold: 95
+  gpu_cache_threshold: 90
   # CPU吞吐量阈值
-  cpu_throughput_threshold: 5
+  cpu_throughput_threshold: 10
   # 任务转移到CPU的token限制倍数
   token_limit_multiplier: 4
   # 任务转移到CPU的token限制最小值
