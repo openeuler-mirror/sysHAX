@@ -1,0 +1,54 @@
+# 系统配置示例文件
+# 复制此文件为config.yaml并根据实际环境修改配置
+# 或者使用环境变量覆盖这些配置项 (例如: APP_SERVICES_GPU_URL)
+
+services:
+  gpu:
+    # GPU 服务主机和端口，请替换为实际值
+    host: "0.0.0.0"
+    port: 7001
+  cpu:
+    # CPU 服务主机和端口，请替换为实际值
+    host: "0.0.0.0"
+    port: 7002
+  conductor:
+    # sysHAX服务配置
+    host: "0.0.0.0"
+    port: 7010
+
+models:
+  # 指定使用的模型
+  default: "{MODEL_NAME}"
+  params:
+    # 生成的最大token数量
+    max_tokens: 200
+    # 生成随机性参数 (0.0-1.0)
+    temperature: 0.7
+    # 性能测试使用的提示语
+    test_prompt: "这是一个标准测试语句，用于测试模型的性能。"
+    # 性能测试生成的token数量
+    test_tokens: 30
+
+system:
+  # 请求队列大小
+  max_queue_size: 200
+  # 请求超时时间(秒)
+  request_timeout: 600
+
+decider:
+  # 最大并发序列数
+  max_num_seqs: 256
+  # GPU缓存使用率阈值
+  gpu_cache_threshold: 90
+  # CPU吞吐量阈值
+  cpu_throughput_threshold: 10
+  # 任务转移到CPU的token限制倍数
+  token_limit_multiplier: 4
+  # 任务转移到CPU的token限制最小值
+  token_limit_min: 10
+  # 任务转移到CPU的token限制最大值
+  token_limit_max: 100
+
+monitor:
+  # 监控间隔(秒)
+  interval: 5
