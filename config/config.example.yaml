@@ -4,17 +4,17 @@
 
 services:
   gpu:
-    # GPU服务地址，请替换为实际地址
-    url: "http://{GPU_HOST}:{GPU_PORT}/v1/completions"
-    metrics_url: "http://{GPU_HOST}:{GPU_PORT}/metrics"
+    # GPU 服务主机和端口，请替换为实际值
+    host: "0.0.0.0"
+    port: 7001
   cpu:
-    # CPU服务地址，请替换为实际地址
-    url: "http://{CPU_HOST}:{CPU_PORT}/v1/completions"
-    metrics_url: "http://{CPU_HOST}:{CPU_PORT}/metrics"
+    # CPU 服务主机和端口，请替换为实际值
+    host: "0.0.0.0"
+    port: 7002
   conductor:
     # sysHAX服务配置
-    host: {APP_HOST}
-    port: {APP_PORT}
+    host: "0.0.0.0"
+    port: 7010
 
 models:
   # 指定使用的模型
@@ -36,10 +36,12 @@ system:
   request_timeout: 600
 
 decider:
+  # 最大并发序列数
+  max_num_seqs: 256
   # GPU缓存使用率阈值
-  gpu_cache_threshold: 95
+  gpu_cache_threshold: 90
   # CPU吞吐量阈值
-  cpu_throughput_threshold: 5
+  cpu_throughput_threshold: 10
   # 任务转移到CPU的token限制倍数
   token_limit_multiplier: 4
   # 任务转移到CPU的token限制最小值

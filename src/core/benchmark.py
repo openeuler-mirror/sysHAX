@@ -14,6 +14,7 @@ Desc:sysHAX 基准测试模块
 """
 
 import asyncio
+import time
 
 from src.core.monitor import SystemMonitor
 from src.utils.config import (
@@ -67,14 +68,16 @@ class PerformanceTester:
 
             # 1. GPU 测试（default_request）
             test_data["max_tokens"] = max_tokens * 10
+            start_time = time.time()
             gpu_res = await self.adaptive_decoder.default_request(test_data)
-            gpu_time = gpu_res.get("decode_time", 0.0)
-            await asyncio.sleep(3)
-            gpu_tp = await self._check_throughput("gpu", gpu_res)
+            gpu_time = time.time() - start_time
+            await asyncio.sleep(1)
+            gpu_tp = await self._check_throughput("gpu", gpu_res, gpu_time)
             Logger.info(
-                f"GPU性能测试: 耗时={gpu_time:.3f}s, 吞吐量={gpu_tp:.2f}tokens/s"
+                f"GPU性能测试: 耗时={gpu_time:.3f}s, 吞吐量={gpu_tp:.2f}tokens/s",
             )
 
+            await asyncio.sleep(3)
             # 2. CPU 测试（prefill_request + decode_request）
             test_data["max_tokens"] = max_tokens
             prefill = await self.adaptive_decoder.prefill_request(test_data)
@@ -82,23 +85,29 @@ class PerformanceTester:
             assert completion_id is not None
 
             decision = {"device": "CPU", "token_limit": max_tokens + 1}
+            start_time = time.time()
             cpu_res = await self.adaptive_decoder.decode_request(
-                test_data, completion_id, decision
+                test_data,
+                completion_id,
+                decision,
             )
-            cpu_time = cpu_res.get("decode_time", 0.0)
-            await asyncio.sleep(3)
-            cpu_tp = await self._check_throughput("cpu", cpu_res)
+            cpu_time = time.time() - start_time
+            await asyncio.sleep(1)
+            cpu_tp = await self._check_throughput("cpu", cpu_res, cpu_time)
             Logger.info(
-                f"CPU性能测试: 耗时={cpu_time:.3f}s, 吞吐量={cpu_tp:.2f}tokens/s"
+                f"CPU性能测试: 耗时={cpu_time:.3f}s, 吞吐量={cpu_tp:.2f}tokens/s",
             )
 
             # 保存结果并计算比率
             self._save_performance_results(
-                gpu_time * 1000, gpu_tp, cpu_time * 1000, cpu_tp
+                gpu_time * 1000,
+                gpu_tp,
+                cpu_time * 1000,
+                cpu_tp,
             )
             summary = self.get_performance_summary()
             Logger.info(
-                f"基准测试完成: GPU/CPU 性能比={summary.get('performance_ratio', 0):.2f}x"
+                f"基准测试完成: GPU/CPU 性能比={summary.get('performance_ratio', 0):.2f}x",
             )
         except (ValueError, KeyError) as e:
             Logger.error(f"基准测试失败: {e!s}")
@@ -125,7 +134,7 @@ class PerformanceTester:
             }
 
             Logger.info(
-                f"准备好decode数据，model={self.model_name}, max_tokens={self.test_tokens}"
+                f"准备好decode数据，model={self.model_name}, max_tokens={self.test_tokens}",
             )
         except (KeyError, TypeError) as e:
             Logger.error(f"准备测试数据失败: {e}", exc_info=True)
@@ -136,25 +145,15 @@ class PerformanceTester:
     async def _get_throughput_metrics(self, device: str) -> float:
         """从监控器获取指定设备的吞吐量指标"""
         await self.system_monitor.update_metrics(force=True)
-        metrics = (
-            self.system_monitor.get_gpu_metrics()
-            if device == "gpu"
-            else self.system_monitor.get_cpu_metrics()
-        )
+        metrics = self.system_monitor.get_gpu_metrics() if device == "gpu" else self.system_monitor.get_cpu_metrics()
         return metrics.get("generation_throughput", 0.0)
 
-    async def _check_throughput(self, device: str, res: dict) -> float:
+    async def _check_throughput(self, device: str, res: dict, decode_time: float) -> float:
         """校验并返回吞吐量，比较监控数据与计算值"""
         native_throughput = await self._get_throughput_metrics(device)
         # 计算值
-        if device == "gpu":
-            tokens = (
-                res.get("response", {}).get("usage", {}).get("completion_tokens", 0)
-            )
-            t = res.get("decode_time", 0.0)
-        else:
-            tokens = res.get("total_tokens_generated", 0)
-            t = res.get("decode_time", 0.0)
+        tokens = res.get("usage", {}).get("completion_tokens", 0)
+        t = decode_time
         calculate_throughput = tokens / t if t > 0 else 0.0
 
         # 如果原生吞吐量不可用，直接返回计算值
@@ -163,11 +162,7 @@ class PerformanceTester:
 
         # 原生与计算值都有效时，校验误差
         if calculate_throughput > 0:
-            diff = (
-                abs(native_throughput - calculate_throughput)
-                / calculate_throughput
-                * 100
-            )
+            diff = abs(native_throughput - calculate_throughput) / calculate_throughput * 100
             Logger.info(
                 f"{device}吞吐量对比: 原生={native_throughput:.2f}, 计算={calculate_throughput:.2f}, 差异={diff:.1f}%",
             )
@@ -209,12 +204,8 @@ class PerformanceTester:
 
         # 计算性能比率
         if self.cpu_performance.throughput > 0:
-            throughput_ratio = (
-                self.gpu_performance.throughput / self.cpu_performance.throughput
-            )
-            latency_ratio = (
-                self.cpu_performance.avg_latency / self.gpu_performance.avg_latency
-            )
+            throughput_ratio = self.gpu_performance.throughput / self.cpu_performance.throughput
+            latency_ratio = self.cpu_performance.avg_latency / self.gpu_performance.avg_latency
             # 综合考虑吞吐量和延迟
             self.performance_ratio = (throughput_ratio + latency_ratio) / 2
             Logger.info(f"GPU/CPU性能比: {self.performance_ratio:.2f}x")
