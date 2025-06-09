@@ -365,23 +365,22 @@ class AdaptiveDecoder:
             async for chunk in response.aiter_bytes():
                 yield chunk
 
-    # ===== 测试函数主接口 =====
-    async def test_completion(self, data: dict[str, Any]) -> dict[str, Any]:
-        """处理 /v1/test/decode_sequence，动态调度"""
-        sequence = data.get("sequence", {"device": "CPU", "token_limit": data.get("max_tokens", 0) + 1})
+    # ===== 强制PD分离解码主接口 =====
+    async def hybrid_inference_completion(self, data: dict[str, Any]) -> dict[str, Any]:
+        """处理 /v1/test/decode_sequence，强制执行：GPU prefill + CPU decode"""
+        assert data.get("max_tokens") is not None, "max_tokens 不能为空"
+        decision = {"device": "CPU", "token_limit": data.get("max_tokens") + 1}
         prefill = await self.prefill_request(data.copy())
         completion_id = prefill["completion_id"]
-        return await self.decode_request(data.copy(), completion_id, sequence)
+        return await self.decode_request(data.copy(), completion_id, decision)
 
-    async def test_completion_stream(self, data: dict[str, Any]) -> AsyncGenerator[bytes, None]:
-        """流式处理 /v1/test/decode_sequence，支持 PD 分离和 GPU 全流程"""
-        start_time = time.time()
-        sequence = data.get("sequence", {"device": "CPU", "token_limit": data.get("max_tokens", 0) + 1})
+    async def hybrid_inference_completion_stream(self, data: dict[str, Any]) -> AsyncGenerator[bytes, None]:
+        """流式处理 /v1/test/decode_sequence，强制执行：GPU prefill + CPU decode"""
+        assert data.get("max_tokens") is not None, "max_tokens 不能为空"
+        decision = {"device": "CPU", "token_limit": data.get("max_tokens") + 1}
         # PD 分离流式解码
         prefill = await self.prefill_request(data.copy())
         completion_id = prefill["completion_id"]
         # 逐块输出
-        async for chunk in self.decode_request_stream(data.copy(), completion_id, sequence):
+        async for chunk in self.decode_request_stream(data.copy(), completion_id, decision):
             yield chunk
-        # 流式完成日志
-        Logger.info(f"测试流式解码完成: time={(time.time() - start_time):.3f}s")

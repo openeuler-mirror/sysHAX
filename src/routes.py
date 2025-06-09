@@ -71,19 +71,9 @@ async def completions(request: Request) -> Any:
         raise_http_exception(500, f"内部服务器错误: {e!s}")
 
 
-# 测试接口
-@router.post("/v1/test/decode_sequence", response_model=None)
-async def test_decode_sequence(request: Request) -> Any:
-    """
-    执行解码测试：GPU prefill + CPU decode
-
-    请求格式：
-    {
-        "model": 模型名称,
-        "prompt": "测试提示词",
-        "max_tokens": 50
-    }
-    """
+@router.post("/v1/chat/hybrid_inference", response_model=None)
+async def hybrid_inference(request: Request) -> Any:
+    """强制执行：GPU prefill + CPU decode"""
     adaptive_decoder = request.app.state.adaptive_decoder
     if adaptive_decoder is None:
         raise HTTPException(status_code=500, detail="自适应解码器未初始化")
@@ -93,10 +83,10 @@ async def test_decode_sequence(request: Request) -> Any:
         # 支持流式 PD 分离和 GPU 全流程
         if data.get("stream"):
             return StreamingResponse(
-                adaptive_decoder.test_completion_stream(data),
+                adaptive_decoder.hybrid_inference_completion_stream(data),
                 media_type="text/event-stream",
             )
-        return await adaptive_decoder.test_completion(data)
+        return await adaptive_decoder.hybrid_inference_completion(data)
     except json.JSONDecodeError:
         raise_http_exception(400, "无效请求")
     except AdaptiveDecoderError as e:
