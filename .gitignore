@@ -44,8 +44,6 @@ logs/
 *.db
 *.sqlite
 *.sqlite3
-*.toml
-*.spec
 
 # 测试文件
 test*/
