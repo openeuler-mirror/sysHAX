@@ -69,7 +69,20 @@ class AdaptiveDecoder:
 
     # ===== 主流程接口 =====
     async def chat_completion(self, data: dict[str, Any]) -> dict[str, Any]:
-        """处理 /v1/chat/completions，动态调度"""
+        """
+        处理 /v1/chat/completions 接口的主流程。
+
+        流程说明：
+        1. 首先调用 self.scheduler.scheduler() 获取推理调度决策（decision）。
+           - decision 字典中包含 device 字段，指示推理阶段应使用的设备（如 GPU 或 CPU）。
+        2. 根据决策分支处理：
+           - 如果 decision["device"] == "GPU"：
+               * 走 GPU 全流程，直接调用 self.default_request(data) 完成推理。
+           - 否则（如 PD 分离场景）：
+               * 先在 GPU 上执行 prefill 阶段，调用 self.prefill_request(data.copy())，获取 completion_id。
+               * 再在 CPU 上执行 decode 阶段，调用 self.decode_request(data.copy(), completion_id, decision)。
+        3. 返回最终推理结果 response。
+        """
         decision = await self.scheduler.scheduler()
         if decision.get("device") == "GPU":
             # GPU 全流程
@@ -82,10 +95,7 @@ class AdaptiveDecoder:
         return response
 
     async def chat_completion_stream(self, data: dict[str, Any]) -> AsyncGenerator[bytes, None]:
-        """流式处理 /v1/chat/completions，支持 PD 分离和 GPU 全流程"""
-        start_time = time.time()
-
-        # 第一次调度
+        """处理 /v1/chat/completions 接口的流式请求。"""
         decision = await self.scheduler.scheduler()
         if decision.get("device") == "GPU":
             # GPU 全流程流式，直接透传所有 SSE chunk
@@ -99,11 +109,9 @@ class AdaptiveDecoder:
             async for chunk in self.decode_request_stream(data.copy(), completion_id, decision):
                 yield chunk
 
-        Logger.info(f"流式处理完成: 耗时={time.time() - start_time:.3f}秒")
-
     # ===== 核心请求 =====
     async def default_request(self, data: dict[str, Any]) -> dict[str, Any]:
-        """直接执行默认的 GPU 全流程请求"""
+        """执行默认：向GPU服务发送完整请求，返回完整响应"""
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 self.v1_chat_gpu,
@@ -118,7 +126,7 @@ class AdaptiveDecoder:
         return response.json()
 
     async def default_request_stream(self, data: dict[str, Any]) -> AsyncGenerator[bytes, None]:
-        """执行默认 GPU 全流程的流式请求，返回字节流生成器"""
+        """执行默认：向GPU服务发送流式请求，返回字节流生成器"""
         async with (
             httpx.AsyncClient() as client,
             client.stream(
@@ -142,7 +150,7 @@ class AdaptiveDecoder:
     # ===== prefill 请求 =====
     async def prefill_request(self, data: dict[str, Any]) -> dict:
         """
-        执行prefill请求
+        向GPU服务发送prefill请求，强制关闭流式，返回completion_id用于继承kv缓存。
 
         Args:
             data: 包含model和prompt等参数的字典
@@ -194,7 +202,12 @@ class AdaptiveDecoder:
         completion_id: str,
         decision: dict[str, Any],
     ) -> dict[str, Any]:
-        """执行 PD 分离非流式解码。"""
+        """
+        执行非流式的 decode 请求。
+
+        该方法在CPU上以非流式方式执行解码，根据调度器决策循环进行解码步骤，直到生成结束（finish_reason不为"scheduled"）。
+        每一步会根据上一次的生成结果和剩余token数动态调整解码参数，最终返回解码的完整响应结果。
+        """
         start_time = time.time()
         last_step_res: dict[str, Any] = {}
         max_tokens = decode_data.get("max_tokens", self.default_max_tokens)
@@ -247,7 +260,7 @@ class AdaptiveDecoder:
         completion_id: str,
         decision: dict[str, Any],
     ) -> AsyncGenerator[bytes, None]:
-        """执行 PD 分离流式解码，仅输出流式 chunk。"""
+        """执行流式的 decode 请求，输出流式 chunk。"""
         start_time = time.time()
         max_tokens = decode_data.get("max_tokens", self.default_max_tokens)
         last_generated_text = ""
@@ -311,7 +324,7 @@ class AdaptiveDecoder:
         decode_data: dict[str, Any],
         device_type: str,
     ) -> dict[str, Any]:
-        """执行单步解码：根据 device_type 发送请求，返回解码结果、生成文本和 token 数"""
+        """执行单步 decode 请求：根据 device_type 发送请求，返回解码结果、生成文本和 token 数"""
         service_url = self.v1_chat_gpu if device_type == "GPU" else self.v1_chat_cpu
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -348,7 +361,7 @@ class AdaptiveDecoder:
         request_data: dict[str, Any],
         device_type: str,
     ) -> AsyncGenerator[bytes, None]:
-        """单步流式请求，只产出原始字节块，调用者解析完整响应"""
+        """单步 decode 流式请求，只产出原始字节块，调用者解析完整响应"""
         async with (
             httpx.AsyncClient() as client,
             client.stream(
