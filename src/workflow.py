@@ -380,7 +380,7 @@ class AdaptiveDecoder:
 
     # ===== 强制PD分离解码主接口 =====
     async def pd_disagg_completion(self, data: dict[str, Any]) -> dict[str, Any]:
-        """处理 /v1/test/decode_sequence，强制执行：GPU prefill + CPU decode"""
+        """非流式处理 /v1/chat/pd_disagg，强制执行：GPU prefill + CPU decode"""
         assert data.get("max_tokens") is not None, "max_tokens 不能为空"
         decision = {"device": "CPU", "token_limit": data.get("max_tokens") + 1}
         prefill = await self.prefill_request(data.copy())
@@ -388,7 +388,7 @@ class AdaptiveDecoder:
         return await self.decode_request(data.copy(), completion_id, decision)
 
     async def pd_disagg_completion_stream(self, data: dict[str, Any]) -> AsyncGenerator[bytes, None]:
-        """流式处理 /v1/test/decode_sequence，强制执行：GPU prefill + CPU decode"""
+        """流式处理 /v1/chat/pd_disagg，强制执行：GPU prefill + CPU decode"""
         assert data.get("max_tokens") is not None, "max_tokens 不能为空"
         decision = {"device": "CPU", "token_limit": data.get("max_tokens") + 1}
         # PD 分离流式解码
