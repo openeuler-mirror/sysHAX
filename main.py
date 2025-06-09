@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.monitor = SystemMonitor()
     app.state.scheduler = Scheduler(system_monitor=app.state.monitor)
     app.state.adaptive_decoder = AdaptiveDecoder(
-        system_monitor=app.state.monitor, scheduler=app.state.scheduler
+        system_monitor=app.state.monitor, scheduler=app.state.scheduler,
     )
     app.state.performance_tester = PerformanceTester(
         system_monitor=app.state.monitor,
@@ -48,7 +48,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await app.state.performance_tester.run_benchmarks()
         performance_summary = app.state.performance_tester.get_performance_summary()
         Logger.info(
-            f"性能测试完成，性能比: {performance_summary.get('performance_ratio', 0):.2f}x"
+            f"性能测试完成，性能比: {performance_summary.get('performance_ratio', 0):.2f}x",
         )
     except (AdaptiveDecoderError, httpx.RequestError) as e:
         Logger.error(f"性能测试失败: {e!s}", exc_info=True)
