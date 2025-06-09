@@ -379,7 +379,7 @@ class AdaptiveDecoder:
                 yield chunk
 
     # ===== 强制PD分离解码主接口 =====
-    async def hybrid_inference_completion(self, data: dict[str, Any]) -> dict[str, Any]:
+    async def pd_disagg_completion(self, data: dict[str, Any]) -> dict[str, Any]:
         """处理 /v1/test/decode_sequence，强制执行：GPU prefill + CPU decode"""
         assert data.get("max_tokens") is not None, "max_tokens 不能为空"
         decision = {"device": "CPU", "token_limit": data.get("max_tokens") + 1}
@@ -387,7 +387,7 @@ class AdaptiveDecoder:
         completion_id = prefill["completion_id"]
         return await self.decode_request(data.copy(), completion_id, decision)
 
-    async def hybrid_inference_completion_stream(self, data: dict[str, Any]) -> AsyncGenerator[bytes, None]:
+    async def pd_disagg_completion_stream(self, data: dict[str, Any]) -> AsyncGenerator[bytes, None]:
         """流式处理 /v1/test/decode_sequence，强制执行：GPU prefill + CPU decode"""
         assert data.get("max_tokens") is not None, "max_tokens 不能为空"
         decision = {"device": "CPU", "token_limit": data.get("max_tokens") + 1}

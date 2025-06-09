@@ -71,8 +71,8 @@ async def completions(request: Request) -> Any:
         raise_http_exception(500, f"内部服务器错误: {e!s}")
 
 
-@router.post("/v1/chat/hybrid_inference", response_model=None)
-async def hybrid_inference(request: Request) -> Any:
+@router.post("/v1/chat/pd_disagg", response_model=None)
+async def pd_disagg(request: Request) -> Any:
     """强制执行：GPU prefill + CPU decode"""
     adaptive_decoder = request.app.state.adaptive_decoder
     if adaptive_decoder is None:
@@ -83,10 +83,10 @@ async def hybrid_inference(request: Request) -> Any:
         # 支持流式 PD 分离和 GPU 全流程
         if data.get("stream"):
             return StreamingResponse(
-                adaptive_decoder.hybrid_inference_completion_stream(data),
+                adaptive_decoder.pd_disagg_completion_stream(data),
                 media_type="text/event-stream",
             )
-        return await adaptive_decoder.hybrid_inference_completion(data)
+        return await adaptive_decoder.pd_disagg_completion(data)
     except json.JSONDecodeError:
         raise_http_exception(400, "无效请求")
     except AdaptiveDecoderError as e:
