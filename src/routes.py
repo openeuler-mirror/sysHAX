@@ -23,7 +23,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from src.utils.config import GPU_HOST, GPU_PORT
+from src.utils.config import DEFAULT_MAX_TOKENS, DEFAULT_TEMPERATURE, GPU_HOST, GPU_PORT
 from src.utils.logger import Logger
 from src.workflow import AdaptiveDecoderError
 
@@ -51,6 +51,10 @@ async def completions(request: Request) -> Any:
 
     try:
         data: dict[str, Any] = await request.json()
+        if "max_tokens" not in data:
+            data["max_tokens"] = DEFAULT_MAX_TOKENS
+        if "temperature" not in data:
+            data["temperature"] = DEFAULT_TEMPERATURE
         # 支持流式 PD 分离和 GPU 全流程
         if data.get("stream"):
             return StreamingResponse(
@@ -80,6 +84,10 @@ async def pd_disagg(request: Request) -> Any:
 
     try:
         data: dict[str, Any] = await request.json()
+        if "max_tokens" not in data:
+            data["max_tokens"] = DEFAULT_MAX_TOKENS
+        if "temperature" not in data:
+            data["temperature"] = DEFAULT_TEMPERATURE
         # 支持流式 PD 分离和 GPU 全流程
         if data.get("stream"):
             return StreamingResponse(
