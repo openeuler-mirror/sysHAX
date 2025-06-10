@@ -312,7 +312,6 @@ def main() -> None:
   models.params.test_prompt            性能测试使用的提示语
   models.params.test_tokens            性能测试生成的 token 数量
 
-  system.max_queue_size                请求队列大小
   system.request_timeout               请求超时时间（秒）
 
   decider.max_num_seqs                 最大并发序列数

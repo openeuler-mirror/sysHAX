@@ -30,8 +30,6 @@ models:
     test_tokens: 30
 
 system:
-  # 请求队列大小
-  max_queue_size: 200
   # 请求超时时间(秒)
   request_timeout: 600
 
