@@ -65,8 +65,7 @@ try:
     SYSHAX_HOST = CONFIG["services"]["conductor"]["host"]
     SYSHAX_PORT = CONFIG["services"]["conductor"]["port"]
 
-    # 请求队列配置
-    MAX_QUEUE_SIZE = CONFIG["system"]["max_queue_size"]
+    # 请求超时时间
     REQUEST_TIMEOUT = CONFIG["system"]["request_timeout"]
 
     # 模型配置
