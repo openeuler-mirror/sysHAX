@@ -283,7 +283,7 @@ def main() -> None:
     )
     parser.add_argument("-h", "--help", action="help", help="显示帮助信息并退出")
     parser.add_argument("--version", action="store_true", help="打印当前版本号并退出")
-    subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
+    subparsers = parser.add_subparsers(dest="command", metavar="COMMAND", help=argparse.SUPPRESS)
 
     subparsers.add_parser("run", help="启动服务")
     subparsers.add_parser("init", help="生成 config/config.yaml")
