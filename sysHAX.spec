@@ -1,5 +1,5 @@
 Name:           sysHAX
-Version:        0.1.0
+Version:        0.2.0
 Release:        1
 Summary:        sysHAX 动态调度服务
 
