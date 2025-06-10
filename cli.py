@@ -279,8 +279,8 @@ def main() -> None:
             "  model             打印当前模型名称、max_tokens、temperature\n"
             '  config            设置配置项；使用 "syshax config --help" 查看详细'
         ),
+        add_help=False,
     )
-    parser.add_argument("-h", "--help", action="help", help="显示帮助信息并退出")
     parser.add_argument("--version", action="store_true", help="打印当前版本号并退出")
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
 
