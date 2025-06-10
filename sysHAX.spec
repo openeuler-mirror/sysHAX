@@ -67,5 +67,5 @@ fi
 rm -f %{_datadir}/sysHAX/config/config.yaml
 
 %changelog
-* Wed May 21 2025 Huawei Technologies Co., Ltd. <youremail@huawei.com> - 0.1.0-1
-- Initial package 
+* Fri May 23 2025 <918688502@qq.com> - 0.2.0-1
+- Initial skeleton of the sysHAX heterogeneous collaborative acceleration runtime, including core modules, configuration management, logging system, command-line tool, API routing, application entry point, documentation, and dependency declaration
