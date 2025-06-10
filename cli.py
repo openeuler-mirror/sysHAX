@@ -264,11 +264,11 @@ def cmd_config(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    """SysHAX 命令行工具"""
+    """使用 sysHAX 命令行工具"""
     parser = argparse.ArgumentParser(
         prog="syshax",
         usage="syshax [OPTIONS] COMMAND [ARGS]...",
-        description="SysHAX 命令行工具",
+        description="欢迎使用 sysHAX 命令行工具",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog=(
             "可用命令:\n"
