@@ -179,11 +179,13 @@ dnf install sysHAX
 
 ```shell
 syshax init
-syshax config gpu.port 8001
-syshax config cpu.port 8002
-syshax config conductor.port 8010
-syshax config model ds-32b
+syshax config services.gpu.port 8001
+syshax config services.cpu.port 8002
+syshax config services.conductor.port 8010
+syshax config models.default ds-32b
 ```
+
+此外，也可以通过 `syshax config --help` 来查看全部配置命令。
 
 配置完成后，通过如下命令启动sysHAX服务：
 
