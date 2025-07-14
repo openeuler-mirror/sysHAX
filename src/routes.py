@@ -51,7 +51,7 @@ async def stream_with_metrics(generator: AsyncGenerator[bytes, None]) -> AsyncGe
     # SSE 格式返回 metrics 事件
     yield f"data: {json.dumps({'metrics': metrics})}\n\n".encode()
 
-async def no_stream_with_metrics(generator: AsyncGenerator[bytes, None]) -> dict:
+async def normal_with_metrics(generator: AsyncGenerator[bytes, None]) -> dict:
     start_time = time.time_ns()
     result = await generator
     time_used = time.time_ns() - start_time
@@ -96,7 +96,7 @@ async def completions(request: Request) -> Any:
                 media_type="text/event-stream",
             )
         gen = adaptive_decoder.chat_completion(data)
-        return await no_stream_with_metrics(gen)
+        return await normal_with_metrics(gen)
     except json.JSONDecodeError:
         raise_http_exception(400, "无效请求")
     except AdaptiveDecoderError as e:
@@ -131,7 +131,7 @@ async def pd_disagg(request: Request) -> Any:
                 media_type="text/event-stream",
             )
         gen = adaptive_decoder.pd_disagg_completion(data)
-        return await no_stream_with_metrics(gen)
+        return await normal_with_metrics(gen)
     except json.JSONDecodeError:
         raise_http_exception(400, "无效请求")
     except AdaptiveDecoderError as e:
