@@ -82,7 +82,6 @@ async def completions(request: Request) -> Any:
                 stream_with_metrics(gen),
                 media_type="text/event-stream",
             )
-        # 非流式执行并返回分段和聚合性能指标
         start_time = time.time_ns()
         result = await adaptive_decoder.chat_completion(data)
         time_used = time.time_ns() - start_time
@@ -92,19 +91,6 @@ async def completions(request: Request) -> Any:
             "tokens": tokens,
             "throughput": f"{round(tokens / (time_used / 1e9), 3) if time_used > 0 else 0}tokens/s",
         }
-        # 分段请求聚合
-        task_id = data.get("task_id")
-        if task_id:
-            agg = request.app.state.segment_metrics.setdefault(task_id, {"time": 0.0, "tokens": 0})
-            agg["time"] += time_used
-            agg["tokens"] += tokens
-            if data.get("is_last_segment"):
-                metrics = {
-                    "time_used": f"{round(agg['time'] / 1e9, 3)}s",
-                    "tokens": agg['tokens'],
-                    "throughput": f"{round(agg['tokens'] / (agg['time'] / 1e9), 3) if agg['time'] > 0 else 0}tokens/s",
-                }
-                del request.app.state.segment_metrics[task_id]
         result["metrics"] = metrics
         return result
     except json.JSONDecodeError:
@@ -150,19 +136,6 @@ async def pd_disagg(request: Request) -> Any:
             "tokens": tokens,
             "throughput": f"{round(tokens / (time_used / 1e9), 3) if time_used > 0 else 0}tokens/s",
         }
-        # 分段请求聚合
-        task_id = data.get("task_id")
-        if task_id:
-            agg = request.app.state.segment_metrics.setdefault(task_id, {"time": 0.0, "tokens": 0})
-            agg["time"] += time_used
-            agg["tokens"] += tokens
-            if data.get("is_last_segment"):
-                metrics = {
-                    "time_used": f"{round(agg['time'], 3)}s",
-                    "tokens": agg['tokens'],
-                    "throughput": f"{round(agg['tokens'] / agg['time'], 3) if agg['time'] > 0 else 0}tokens/s",
-                }
-                del request.app.state.segment_metrics[task_id]
         result["metrics"] = metrics
         return result
     except json.JSONDecodeError:
