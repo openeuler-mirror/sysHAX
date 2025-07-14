@@ -43,6 +43,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         system_monitor=app.state.monitor,
         decoder=app.state.adaptive_decoder,
     )
+    # 初始化分段请求性能指标存储
+    app.state.segment_metrics = {}
     Logger.info("开始执行性能基准测试...")
     try:
         await app.state.performance_tester.run_benchmarks()
