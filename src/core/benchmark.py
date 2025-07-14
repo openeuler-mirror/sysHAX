@@ -68,13 +68,13 @@ class PerformanceTester:
 
             # 1. GPU 测试（default_request）
             test_data["max_tokens"] = max_tokens * 10
-            start_time = time.time()
+            start_time = time.time_ns()
             gpu_res = await self.adaptive_decoder.default_request(test_data)
-            gpu_time = time.time() - start_time
+            gpu_time = time.time_ns() - start_time
             await asyncio.sleep(1)
-            gpu_tp = await self._check_throughput("gpu", gpu_res, gpu_time)
+            gpu_tp = await self._check_throughput("gpu", gpu_res, gpu_time / 1e9)
             Logger.info(
-                f"GPU性能测试: 耗时={gpu_time:.3f}s, 吞吐量={gpu_tp:.2f}tokens/s",
+                f"GPU性能测试: 耗时={gpu_time / 1e9:.3f}s, 吞吐量={gpu_tp:.2f}tokens/s",
             )
 
             await asyncio.sleep(3)
@@ -85,17 +85,17 @@ class PerformanceTester:
             assert completion_id is not None
 
             decision = {"device": "CPU", "token_limit": max_tokens + 1}
-            start_time = time.time()
+            start_time = time.time_ns()
             cpu_res = await self.adaptive_decoder.decode_request(
                 test_data,
                 completion_id,
                 decision,
             )
-            cpu_time = time.time() - start_time
+            cpu_time = time.time_ns() - start_time
             await asyncio.sleep(1)
-            cpu_tp = await self._check_throughput("cpu", cpu_res, cpu_time)
+            cpu_tp = await self._check_throughput("cpu", cpu_res, cpu_time / 1e9)
             Logger.info(
-                f"CPU性能测试: 耗时={cpu_time:.3f}s, 吞吐量={cpu_tp:.2f}tokens/s",
+                f"CPU性能测试: 耗时={cpu_time / 1e9:.3f}s, 吞吐量={cpu_tp:.2f}tokens/s",
             )
 
             # 保存结果并计算比率

@@ -83,31 +83,41 @@ class AdaptiveDecoder:
                * 再在 CPU 上执行 decode 阶段，调用 self.decode_request(data.copy(), completion_id, decision)。
         3. 返回最终推理结果 response。
         """
-        decision = await self.scheduler.scheduler()
-        if decision.get("device") == "GPU":
-            # GPU 全流程
-            response = await self.default_request(data)
-        else:
-            # PD 分离
-            prefill = await self.prefill_request(data.copy())
-            completion_id = prefill["completion_id"]
-            response = await self.decode_request(data.copy(), completion_id, decision)
-        return response
+        try:
+            decision = await self.scheduler.scheduler()
+            if decision.get("device") == "GPU":
+                # GPU 全流程
+                response = await self.default_request(data)
+            else:
+                # PD 分离
+                prefill = await self.prefill_request(data.copy())
+                completion_id = prefill["completion_id"]
+                response = await self.decode_request(data.copy(), completion_id, decision)
+            return response
+        except AdaptiveDecoderError as e:
+            # 处理默认请求失败，记录并返回错误信息给客户端
+            Logger.info_console(f"请求失败: {e}")
+            return {"error": str(e)}
 
     async def chat_completion_stream(self, data: dict[str, Any]) -> AsyncGenerator[bytes, None]:
         """处理 /v1/chat/completions 接口的流式请求。"""
-        decision = await self.scheduler.scheduler()
-        if decision.get("device") == "GPU":
-            # GPU 全流程流式，直接透传所有 SSE chunk
-            async for chunk in self.default_request_stream(data):
-                yield chunk
-        else:
-            # PD 分离流式解码，委托给通用方法
-            prefill = await self.prefill_request(data.copy())
-            completion_id = prefill["completion_id"]
-            # 使用初始调度决策作为参数，交由decode_request_stream内部调度
-            async for chunk in self.decode_request_stream(data.copy(), completion_id, decision):
-                yield chunk
+        try:
+            decision = await self.scheduler.scheduler()
+            if decision.get("device") == "GPU":
+                # GPU 全流程流式，直接透传所有 SSE chunk
+                async for chunk in self.default_request_stream(data):
+                    yield chunk
+            else:
+                # PD 分离流式解码，委托给通用方法
+                prefill = await self.prefill_request(data.copy())
+                completion_id = prefill["completion_id"]
+                # 使用初始调度决策作为参数，交由decode_request_stream内部调度
+                async for chunk in self.decode_request_stream(data.copy(), completion_id, decision):
+                    yield chunk
+        except AdaptiveDecoderError as e:
+            # 捕获默认请求或解码流式失败，将错误作为 SSE 事件返回并结束生成器
+            Logger.info_console(f"请求失败: {e}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n".encode()
 
     # ===== 核心请求 =====
     async def default_request(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -159,7 +169,7 @@ class AdaptiveDecoder:
             Dict: 包含completion_id和相关信息的字典
 
         """
-        start_time = time.time()
+        start_time = time.time_ns()
         prefill_data = data.copy()
         # Prefill 强制关闭流式
         prefill_data["stream"] = False
@@ -178,14 +188,14 @@ class AdaptiveDecoder:
                 if response.status_code != httpx.codes.OK:
                     _raise_error(f"Prefill请求失败: HTTP {response.status_code}, 响应: {response.text}")
 
-                prefill_time = time.time() - start_time
+                prefill_time = time.time_ns() - start_time
                 prefill_response = response.json()
 
                 completion_id = prefill_response.get("id")
                 if not completion_id:
                     _raise_error("Prefill响应缺少completion ID")
                 Logger.info(
-                    f"Prefill完成: 耗时={prefill_time:.3f}秒, completion_id={completion_id}",
+                    f"Prefill完成: 耗时={prefill_time / 1e9:.3f}秒, completion_id={completion_id}",
                 )
             except (httpx.RequestError, ValueError) as e:
                 _raise_error(f"Prefill请求异常: {e!s}", e)
@@ -208,16 +218,12 @@ class AdaptiveDecoder:
         该方法在CPU上以非流式方式执行解码，根据调度器决策循环进行解码步骤，直到生成结束（finish_reason不为"scheduled"）。
         每一步会根据上一次的生成结果和剩余token数动态调整解码参数，最终返回解码的完整响应结果。
         """
-        start_time = time.time()
+        start_time = time.time_ns()
         last_step_res: dict[str, Any] = {}
         max_tokens = decode_data.get("max_tokens", self.default_max_tokens)
-        total_tokens_generated = 0
         last_generated_text = ""
         finish_reason = "scheduled"
         curr_decision = decision
-
-        # 当前版本仅支持CPU完整decode
-        curr_decision = {"device": "CPU", "token_limit": max_tokens + 1}
 
         while finish_reason == "scheduled":
             device = curr_decision.get("device", "GPU")
@@ -234,22 +240,20 @@ class AdaptiveDecoder:
             assert step_res is not None, "decode结果为空"
 
             completion_id = step_res.get("request_id", "")
-            new_token_count = step_res.get("new_token_count", 0)
+            total_token_count = step_res.get("new_token_count", 0)
             finish_reason = step_res.get("finish_reason") or ""
             last_generated_text = step_res.get("generated_text", "")
 
             last_step_res = step_res.get("response", {})
-            total_tokens_generated += new_token_count
-            max_tokens -= new_token_count
-            decode_data["max_tokens"] = max_tokens
+            decode_data["max_tokens"] = max_tokens - total_token_count if max_tokens > total_token_count else 1
 
             if finish_reason == "scheduled":
                 curr_decision = await self.scheduler.scheduler()
 
-        decode_time = time.time() - start_time
+        decode_time = time.time_ns() - start_time
         Logger.info(
-            f"PD 分离解码完成: 耗时={decode_time:.3f}秒, "
-            f"生成{total_tokens_generated}个tokens, "
+            f"PD 分离解码完成: 耗时={decode_time / 1e9:.3f}秒, "
+            f"共生成{total_token_count}个tokens, "
             f"finish_reason={finish_reason}",
         )
         return last_step_res
@@ -261,15 +265,12 @@ class AdaptiveDecoder:
         decision: dict[str, Any],
     ) -> AsyncGenerator[bytes, None]:
         """执行流式的 decode 请求，输出流式 chunk。"""
-        start_time = time.time()
+        start_time = time.time_ns()
         max_tokens = decode_data.get("max_tokens", self.default_max_tokens)
         last_generated_text = ""
         finish_reason = "scheduled"
         curr_decision = decision
-
-        # 当前版本仅支持CPU完整decode
-        curr_decision = {"device": "CPU", "token_limit": max_tokens + 1}
-
+        total_token_count = 0
         while finish_reason == "scheduled":
             # 调度决策
             device = curr_decision.get("device", "GPU")
@@ -309,13 +310,14 @@ class AdaptiveDecoder:
             # 更新状态，为下一轮做准备
             last_generated_text = generated_text_acc
             max_tokens -= token_count
+            total_token_count += token_count
             decode_data["max_tokens"] = max_tokens
             if finish_reason == "scheduled":
                 curr_decision = await self.scheduler.scheduler()
 
-        decode_time = time.time() - start_time
+        decode_time = time.time_ns() - start_time
         Logger.info(
-            f"PD 分离解码完成: 耗时={decode_time:.3f}秒, 生成{token_count}个tokens, finish_reason={finish_reason}",
+            f"PD 分离解码完成: 耗时={decode_time / 1e9:.3f}秒, 共生成{total_token_count}个tokens, finish_reason={finish_reason}",
         )
 
     # ===== 私有解码步骤 =====

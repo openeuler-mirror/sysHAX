@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import time
 from typing import Any, NoReturn, Union
+from typing import AsyncGenerator
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -30,6 +31,38 @@ from src.workflow import AdaptiveDecoderError
 # 创建路由器
 router = APIRouter()
 
+# 添加流式返回给客户端的性能指标
+async def stream_with_metrics(generator: AsyncGenerator[bytes, None]) -> AsyncGenerator[bytes, None]:
+    start_time = time.time_ns()
+    first_token_time = None
+    tokens = 0
+    async for chunk in generator:
+        tokens += 1
+        if first_token_time is None:
+            first_token_time = time.time_ns()
+        yield chunk
+    time_used = time.time_ns() - start_time
+    metrics = {
+        "TTFB": f"{round((first_token_time - start_time) / 1e9, 3)}s",
+        "time_used": f"{round(time_used / 1e9, 3)}s",
+        "tokens": tokens,
+        "throughput": f"{round(tokens / (time_used / 1e9), 3) if time_used > 0 else 0}tokens/s",
+    }
+    # SSE 格式返回 metrics 事件
+    yield f"data: {json.dumps({'metrics': metrics})}\n\n".encode()
+
+async def normal_with_metrics(generator: AsyncGenerator[bytes, None]) -> dict:
+    start_time = time.time_ns()
+    result = await generator
+    time_used = time.time_ns() - start_time
+    tokens = result.get("usage", {}).get("completion_tokens", 0)
+    metrics = {
+        "time_used": f"{round(time_used / 1e9, 3)}s",
+        "tokens": tokens,
+        "throughput": f"{round(tokens / (time_used / 1e9), 3) if time_used > 0 else 0}tokens/s",
+    }
+    result["metrics"] = metrics
+    return result
 
 def raise_http_exception(status_code: int, detail: str) -> NoReturn:
     """抛出HTTP异常，返回指定状态码和错误信息"""
@@ -57,11 +90,13 @@ async def completions(request: Request) -> Any:
             data["temperature"] = DEFAULT_TEMPERATURE
         # 支持流式 PD 分离和 GPU 全流程
         if data.get("stream"):
+            gen = adaptive_decoder.chat_completion_stream(data)
             return StreamingResponse(
-                adaptive_decoder.chat_completion_stream(data),
+                stream_with_metrics(gen),
                 media_type="text/event-stream",
             )
-        return await adaptive_decoder.chat_completion(data)
+        gen = adaptive_decoder.chat_completion(data)
+        return await normal_with_metrics(gen)
     except json.JSONDecodeError:
         raise_http_exception(400, "无效请求")
     except AdaptiveDecoderError as e:
@@ -90,11 +125,13 @@ async def pd_disagg(request: Request) -> Any:
             data["temperature"] = DEFAULT_TEMPERATURE
         # 支持流式 PD 分离和 GPU 全流程
         if data.get("stream"):
+            gen = adaptive_decoder.pd_disagg_completion_stream(data)
             return StreamingResponse(
-                adaptive_decoder.pd_disagg_completion_stream(data),
+                stream_with_metrics(gen),
                 media_type="text/event-stream",
             )
-        return await adaptive_decoder.pd_disagg_completion(data)
+        gen = adaptive_decoder.pd_disagg_completion(data)
+        return await normal_with_metrics(gen)
     except json.JSONDecodeError:
         raise_http_exception(400, "无效请求")
     except AdaptiveDecoderError as e:
