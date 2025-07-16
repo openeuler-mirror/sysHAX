@@ -27,7 +27,9 @@ if TYPE_CHECKING:
     from src.core.monitor import SystemMonitor
     from src.core.scheduler import Scheduler
 
-from src.utils.config import CPU_HOST, CPU_PORT, DEFAULT_MAX_TOKENS, GPU_HOST, GPU_PORT
+from src.utils.config import CPU_HOST, CPU_PORT, GPU_HOST, GPU_PORT, MONITOR_INTERVAL
+import asyncio
+
 from src.utils.logger import Logger
 
 
@@ -64,8 +66,6 @@ class AdaptiveDecoder:
         # 拼接 /v1/chat/completions 服务地址
         self.v1_chat_gpu = f"http://{GPU_HOST}:{GPU_PORT}/v1/chat/completions"
         self.v1_chat_cpu = f"http://{CPU_HOST}:{CPU_PORT}/v1/chat/completions"
-
-        self.default_max_tokens = DEFAULT_MAX_TOKENS
 
     # ===== 主流程接口 =====
     async def chat_completion(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -190,6 +190,9 @@ class AdaptiveDecoder:
 
                 prefill_time = time.time_ns() - start_time
                 prefill_response = response.json()
+                usage = prefill_response.get("usage", {})
+                tokens = usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
+                self.system_monitor.gpu_monitor.add_prefill_stats(tokens, prefill_time)
 
                 completion_id = prefill_response.get("id")
                 if not completion_id:
@@ -220,7 +223,10 @@ class AdaptiveDecoder:
         """
         start_time = time.time_ns()
         last_step_res: dict[str, Any] = {}
-        max_tokens = decode_data.get("max_tokens", self.default_max_tokens)
+        max_tokens = decode_data.get("max_tokens")
+        if max_tokens is None:
+            Logger.warning("max_tokens not found in request which will using default value 10")
+            max_tokens = 10
         last_generated_text = ""
         finish_reason = "scheduled"
         curr_decision = decision
@@ -266,12 +272,16 @@ class AdaptiveDecoder:
     ) -> AsyncGenerator[bytes, None]:
         """执行流式的 decode 请求，输出流式 chunk。"""
         start_time = time.time_ns()
-        max_tokens = decode_data.get("max_tokens", self.default_max_tokens)
+        max_tokens = decode_data.get("max_tokens")
+        if max_tokens is None:
+            Logger.warning("max_tokens not found in request which will using default value 10")
+            max_tokens = 10
         last_generated_text = ""
         finish_reason = "scheduled"
         curr_decision = decision
         total_token_count = 0
         while finish_reason == "scheduled":
+            segment_start = time.time_ns()
             # 调度决策
             device = curr_decision.get("device", "GPU")
             token_limit = curr_decision.get("token_limit", 0)
@@ -314,7 +324,10 @@ class AdaptiveDecoder:
             decode_data["max_tokens"] = max_tokens
             if finish_reason == "scheduled":
                 curr_decision = await self.scheduler.scheduler()
-
+            # accumulate per-segment decode stats for aggregated throughput
+            segment_time = time.time_ns() - segment_start
+            self.system_monitor.gpu_monitor.add_decode_stats(token_count, segment_time) if device == "GPU" else \
+                self.system_monitor.cpu_monitor.add_decode_stats(token_count, segment_time)
         decode_time = time.time_ns() - start_time
         Logger.info(
             f"PD 分离解码完成: 耗时={decode_time / 1e9:.3f}秒, 共生成{total_token_count}个tokens, finish_reason={finish_reason}",

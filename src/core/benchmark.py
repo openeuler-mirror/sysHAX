@@ -18,14 +18,14 @@ import time
 
 from src.core.monitor import SystemMonitor
 from src.utils.config import (
-    DEFAULT_MODEL,
-    DEFAULT_TEST_PROMPT,
-    DEFAULT_TEST_TOKENS,
-    ServicePerformance,
+    MODEL_NAME,
+    set_token_limit
 )
 from src.utils.logger import Logger
 from src.workflow import AdaptiveDecoder
 
+TEST_PROMPT = "hello " * 512
+TEST_TOKENS = 512
 
 class PerformanceTester:
     """性能测试工具，在启动时测量GPU和CPU服务的性能"""
@@ -46,9 +46,9 @@ class PerformanceTester:
         self.adaptive_decoder = decoder
 
         # 测试参数 - 从配置中获取
-        self.test_prompt = DEFAULT_TEST_PROMPT
-        self.test_tokens = DEFAULT_TEST_TOKENS
-        self.model_name = DEFAULT_MODEL
+        self.test_prompt = TEST_PROMPT
+        self.test_tokens = TEST_TOKENS
+        self.model_name = MODEL_NAME
         self.diff_percent_threshold = 30
 
         # 性能测试结果
@@ -67,7 +67,6 @@ class PerformanceTester:
             max_tokens = test_data.get("max_tokens", self.test_tokens)
 
             # 1. GPU 测试（default_request）
-            test_data["max_tokens"] = max_tokens * 10
             start_time = time.time_ns()
             gpu_res = await self.adaptive_decoder.default_request(test_data)
             gpu_time = time.time_ns() - start_time
@@ -76,7 +75,6 @@ class PerformanceTester:
             Logger.info(
                 f"GPU性能测试: 耗时={gpu_time / 1e9:.3f}s, 吞吐量={gpu_tp:.2f}tokens/s",
             )
-
             await asyncio.sleep(3)
             # 2. CPU 测试（prefill_request + decode_request）
             test_data["max_tokens"] = max_tokens
@@ -94,21 +92,12 @@ class PerformanceTester:
             cpu_time = time.time_ns() - start_time
             await asyncio.sleep(1)
             cpu_tp = await self._check_throughput("cpu", cpu_res, cpu_time / 1e9)
+            set_token_limit(int(cpu_tp))
             Logger.info(
                 f"CPU性能测试: 耗时={cpu_time / 1e9:.3f}s, 吞吐量={cpu_tp:.2f}tokens/s",
             )
 
-            # 保存结果并计算比率
-            self._save_performance_results(
-                gpu_time * 1000,
-                gpu_tp,
-                cpu_time * 1000,
-                cpu_tp,
-            )
-            summary = self.get_performance_summary()
-            Logger.info(
-                f"基准测试完成: GPU/CPU 性能比={summary.get('performance_ratio', 0):.2f}x",
-            )
+            Logger.info(f"gpu测试单batch吞吐量：{gpu_tp:.3f}, cpu测试单batch吞吐量：{cpu_tp:.3f}")
         except (ValueError, KeyError) as e:
             Logger.error(f"基准测试失败: {e!s}")
 
@@ -130,6 +119,7 @@ class PerformanceTester:
                 "stream": False,
                 "n": 1,
                 "max_tokens": self.test_tokens,
+                "ignore_eos": True,
                 "temperature": 0,  # 基准测试固定使用temperature=0
             }
 
@@ -145,8 +135,8 @@ class PerformanceTester:
     async def _get_throughput_metrics(self, device: str) -> float:
         """从监控器获取指定设备的吞吐量指标"""
         await self.system_monitor.update_metrics(force=True)
-        metrics = self.system_monitor.get_gpu_metrics() if device == "gpu" else self.system_monitor.get_cpu_metrics()
-        return metrics.get("generation_throughput", 0.0)
+        metrics = self.system_monitor.gpu_metrics if device == "gpu" else self.system_monitor.cpu_metrics
+        return metrics.decode_throughout
 
     async def _check_throughput(self, device: str, res: dict, decode_time: float) -> float:
         """校验并返回吞吐量，比较监控数据与计算值"""
@@ -171,61 +161,3 @@ class PerformanceTester:
                 return calculate_throughput
         return native_throughput
 
-    def _save_performance_results(
-        self,
-        gpu_latency: float,
-        gpu_throughput: float,
-        cpu_latency: float,
-        cpu_throughput: float,
-    ) -> None:
-        """
-        保存性能测试结果并计算性能比率
-
-        性能比率计算公式:
-        1. 吞吐量比率 = GPU吞吐量 / CPU吞吐量
-           (衡量GPU每秒处理的token数量与CPU相比的倍数)
-        2. 延迟比率 = CPU延迟 / GPU延迟
-           (衡量CPU响应时间与GPU相比的倍数)
-        3. 综合性能比率 = (吞吐量比率 + 延迟比率) / 2
-           (取两个比率的平均值，综合考虑速度和响应时间)
-
-        比率越高，表示GPU相对于CPU的性能优势越大。
-
-        Args:
-            gpu_latency: GPU服务延迟(毫秒)
-            gpu_throughput: GPU服务吞吐量(tokens/秒)
-            cpu_latency: CPU服务延迟(毫秒)
-            cpu_throughput: CPU服务吞吐量(tokens/秒)
-
-        """
-        # 保存性能测试结果
-        self.gpu_performance = ServicePerformance(gpu_latency, gpu_throughput)
-        self.cpu_performance = ServicePerformance(cpu_latency, cpu_throughput)
-
-        # 计算性能比率
-        if self.cpu_performance.throughput > 0:
-            throughput_ratio = self.gpu_performance.throughput / self.cpu_performance.throughput
-            latency_ratio = self.cpu_performance.avg_latency / self.gpu_performance.avg_latency
-            # 综合考虑吞吐量和延迟
-            self.performance_ratio = (throughput_ratio + latency_ratio) / 2
-            Logger.info(f"GPU/CPU性能比: {self.performance_ratio:.2f}x")
-        else:
-            self.performance_ratio = 10.0  # 默认值
-            Logger.info(f"使用默认性能比率: {self.performance_ratio}")
-
-    def get_performance_summary(self) -> dict:
-        """获取性能测试结果摘要"""
-        if not self.gpu_performance or not self.cpu_performance:
-            return {"status": "未完成测试"}
-
-        return {
-            "gpu": {
-                "latency_ms": self.gpu_performance.avg_latency,
-                "throughput": self.gpu_performance.throughput,
-            },
-            "cpu": {
-                "latency_ms": self.cpu_performance.avg_latency,
-                "throughput": self.cpu_performance.throughput,
-            },
-            "performance_ratio": self.performance_ratio,
-        }
