@@ -15,15 +15,12 @@ Desc:sysHAX 调度决策模块
 
 from src.core.monitor import SystemMonitor
 from src.utils.config import (
-    CPU_THROUGHPUT_THRESHOLD,
-    GPU_CACHE_THRESHOLD,
-    MAX_NUM_SEQS,
-    TOKEN_LIMIT_MAX,
-    TOKEN_LIMIT_MIN,
-    TOKEN_LIMIT_MULTIPLIER,
+    GPU_KV_CACHE_THRESHOLD,
+    GPU_THROUGHPUT_LOWER_BOUND,
+    GPU_MAX_BATCH_SIZE,
+    CPU_MAX_BATCH_SIZE
 )
 from src.utils.logger import Logger
-
 
 class Scheduler:
     """
@@ -58,58 +55,54 @@ class Scheduler:
         # 更新系统指标
         await self.system_monitor.update_metrics()
 
-        # 获取GPU和CPU指标
-        gpu_metrics = self.system_monitor.get_gpu_metrics()
-        cpu_metrics = self.system_monitor.get_cpu_metrics()
-
-        # 获取GPU缓存使用率和CPU吞吐量
-        gpu_cache_usage = gpu_metrics["gpu_cache_usage"] * 100  # 转换为百分比
-        cpu_throughput = cpu_metrics["generation_throughput"]  # tokens/s
-
-        # GPU侧调度逻辑
-        gpu_running = gpu_metrics["num_running"]
-        gpu_waiting = gpu_metrics["num_waiting"]
-        cpu_running = cpu_metrics["num_running"]
+        gpu_cache_usage = self.system_monitor.gpu_metrics.gpu_cache_usage * 100  # 转换为百分比
+        gpu_throughput = self.system_monitor.gpu_metrics.decode_throughout # tokens/s
+        cpu_throughput = self.system_monitor.cpu_metrics.decode_throughout # tokens/s
+        gpu_running = self.system_monitor.gpu_metrics.num_running
+        gpu_waiting = self.system_monitor.gpu_metrics.num_waiting
+        gpu_swapped = self.system_monitor.gpu_metrics.num_swapped
+        cpu_running = self.system_monitor.cpu_metrics.num_running
 
         # 是否将任务转移到CPU
         log_msg = ""
         use_cpu = False
-        if MAX_NUM_SEQS is not None and gpu_running >= MAX_NUM_SEQS:
+        if GPU_THROUGHPUT_LOWER_BOUND is not None and gpu_throughput < GPU_THROUGHPUT_LOWER_BOUND and \
+          gpu_throughput > 0.1:    # 校验0.1的目的是防止未进行推理时的误调度
             use_cpu = True
-            log_msg = f"GPU并发达到最大序列数({MAX_NUM_SEQS})，"
-        elif MAX_NUM_SEQS is None and gpu_running > 0 and gpu_waiting > 0:
+            log_msg = f"GPU吞吐量为{gpu_throughput:.2f}tokens/s，低于{GPU_THROUGHPUT_LOWER_BOUND:.2f}tokens/s，"
+        elif GPU_KV_CACHE_THRESHOLD is not None and gpu_cache_usage > GPU_KV_CACHE_THRESHOLD:
             use_cpu = True
-            log_msg = "GPU存在等待队列堵塞，"
-        elif gpu_cache_usage > GPU_CACHE_THRESHOLD:
+            log_msg = f"GPU kvcache使用率为{gpu_cache_usage:.2f}%，超过{GPU_KV_CACHE_THRESHOLD:.2f}%"
+        elif GPU_MAX_BATCH_SIZE is not None and gpu_running >= GPU_MAX_BATCH_SIZE:
             use_cpu = True
-            log_msg = f"GPU缓存使用率过高({gpu_cache_usage:.1f}%)，"
+            log_msg = f"GPU达到最大并发量{GPU_MAX_BATCH_SIZE}%，"
+        elif gpu_swapped > 0:
+            use_cpu = True
+            log_msg = f"GPU侧资源不足，"
 
         # 如果GPU可用，则继续在GPU上执行
         if not use_cpu:
             decision = {"device": "GPU", "token_limit": 0}
-            Logger.info(f"调度决策: {decision}")
+            Logger.info(f"\033[1;32m调度决策: {decision}\033[0m")
             return decision
 
         # CPU侧调度逻辑
-        if cpu_throughput < CPU_THROUGHPUT_THRESHOLD and cpu_running >= 1:
+        if cpu_running >= CPU_MAX_BATCH_SIZE:
             decision = {"device": None, "token_limit": 0}
-            log_msg += "CPU繁忙，停止接收新任务。"
-        elif cpu_throughput < CPU_THROUGHPUT_THRESHOLD:
-            decision = {"device": "CPU", "token_limit": self._calculate_token_limit(cpu_throughput)}
-            log_msg += "CPU性能较低，执行PD分离。"
-        elif cpu_running >= MAX_NUM_SEQS:
-            decision = {"device": None, "token_limit": 0}
-            log_msg += f"CPU达到最大并发序列数({MAX_NUM_SEQS})，停止接收新任务。"
+            log_msg += "CPU达到最大并发量，停止接收新任务。"
         else:
-            decision = {"device": "CPU", "token_limit": self._calculate_token_limit(cpu_throughput)}
+            Logger.info_console(f"cpu_throughput: {cpu_throughput}")
+            if int(cpu_throughput) > 0:
+                self.token_limit = int(cpu_throughput)
+            else:
+                from src.utils.config import DEFAULT_TOKEN_LIMIT
+                self.token_limit = DEFAULT_TOKEN_LIMIT
+            decision = {"device": "CPU", "token_limit": self.token_limit}
             log_msg += "执行PD分离。"
+            from src.utils.config import DEFAULT_TOKEN_LIMIT
+            Logger.info_console(f"DEFAULT_TOKEN_LIMIT: {DEFAULT_TOKEN_LIMIT}")
 
-        Logger.info(log_msg)
-        Logger.info(f"调度决策: {decision}")
+        Logger.info(f"\033[1;32m{log_msg}\033[0m")
+        Logger.info(f"\033[1;32m调度决策: {decision}\033[0m")
         return decision
 
-    @staticmethod
-    def _calculate_token_limit(cpu_throughput: float) -> int:
-        """计算token限制"""
-        token = int(round(cpu_throughput * TOKEN_LIMIT_MULTIPLIER, -1))
-        return min(max(token, TOKEN_LIMIT_MIN), TOKEN_LIMIT_MAX)

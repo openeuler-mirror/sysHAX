@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
+import sys
 import uvicorn
 from fastapi import FastAPI
 
@@ -46,12 +47,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Logger.info("开始执行性能基准测试...")
     try:
         await app.state.performance_tester.run_benchmarks()
-        performance_summary = app.state.performance_tester.get_performance_summary()
-        Logger.info(
-            f"性能测试完成，性能比: {performance_summary.get('performance_ratio', 0):.2f}x",
-        )
     except (AdaptiveDecoderError, httpx.RequestError) as e:
         Logger.error(f"性能测试失败: {e!s}", exc_info=True)
+        sys.exit(1)
     Logger.info("应用启动完成，API接口已就绪")
     try:
         yield

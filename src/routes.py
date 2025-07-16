@@ -24,7 +24,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from src.utils.config import DEFAULT_MAX_TOKENS, DEFAULT_TEMPERATURE, GPU_HOST, GPU_PORT
+from src.utils.config import GPU_HOST, GPU_PORT
 from src.utils.logger import Logger
 from src.workflow import AdaptiveDecoderError
 
@@ -84,10 +84,6 @@ async def completions(request: Request) -> Any:
 
     try:
         data: dict[str, Any] = await request.json()
-        if "max_tokens" not in data:
-            data["max_tokens"] = DEFAULT_MAX_TOKENS
-        if "temperature" not in data:
-            data["temperature"] = DEFAULT_TEMPERATURE
         # 支持流式 PD 分离和 GPU 全流程
         if data.get("stream"):
             gen = adaptive_decoder.chat_completion_stream(data)
@@ -119,10 +115,6 @@ async def pd_disagg(request: Request) -> Any:
 
     try:
         data: dict[str, Any] = await request.json()
-        if "max_tokens" not in data:
-            data["max_tokens"] = DEFAULT_MAX_TOKENS
-        if "temperature" not in data:
-            data["temperature"] = DEFAULT_TEMPERATURE
         # 支持流式 PD 分离和 GPU 全流程
         if data.get("stream"):
             gen = adaptive_decoder.pd_disagg_completion_stream(data)
@@ -155,8 +147,8 @@ async def get_metrics(request: Request) -> Union[JSONResponse, dict[str, Any]]:
     await system_monitor.update_metrics()
 
     # 获取GPU和CPU指标
-    gpu_metrics = system_monitor.get_gpu_metrics()
-    cpu_metrics = system_monitor.get_cpu_metrics()
+    gpu_metrics = system_monitor.gpu_metrics()
+    cpu_metrics = system_monitor.cpu_metrics()
 
     Logger.info(f"GPU指标: {gpu_metrics}")
     Logger.info(f"CPU指标: {cpu_metrics}")

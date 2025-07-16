@@ -14,21 +14,16 @@ Desc:sysHAX 资源监控模块
 """
 
 import re
+from re import Pattern
 import time
-
+from typing import Callable
 import httpx
 
 from src.utils.config import CPU_HOST, CPU_PORT, GPU_HOST, GPU_PORT, MONITOR_INTERVAL
 from src.utils.logger import Logger
+from dataclasses import dataclass
 
 # Prometheus指标正则匹配模式
-# 吞吐量指标 - vLLM原生吞吐量指标，tokens/s
-RE_GEN_THROUGHPUT = re.compile(
-    r"vllm:avg_generation_throughput_toks_per_s{[^}]*}\s+([\d.]+)",
-)  # 生成阶段吞吐量
-RE_PROMPT_THROUGHPUT = re.compile(
-    r"vllm:avg_prompt_throughput_toks_per_s{[^}]*}\s+([\d.]+)",
-)  # 输入处理阶段吞吐量
 
 # 资源使用指标
 RE_GPU_CACHE = re.compile(
@@ -47,14 +42,15 @@ RE_SWAPPED_REQS = re.compile(
     r"vllm:num_requests_swapped{[^}]*}\s+(\d+)",
 )  # 已交换请求数：从GPU交换到CPU内存的请求数量
 
-# Token计数指标
-RE_PREFILL_TOKENS = re.compile(
-    r"vllm:prompt_tokens_total{[^}]*}\s+([\d.]+)",
-)  # Prefill token累计总数
-RE_DECODE_TOKENS = re.compile(
-    r"vllm:generation_tokens_total{[^}]*}\s+([\d.]+)",
-)  # Decode token累计总数
-
+@dataclass
+class MetricsData:
+    gpu_cache_usage: float = 0.0
+    cpu_cache_usage: float = 0.0
+    num_running: int = 0
+    num_waiting: int = 0
+    num_swapped: int = 0
+    prefill_throughout: float = 0.0
+    decode_throughout: float = 0.0
 
 class ResourceMonitor:
     """
@@ -83,40 +79,16 @@ class ResourceMonitor:
             f"初始化{service_name}监控：{metrics_url}, 更新间隔={self.update_interval}秒",
         )
 
-        # 指标缓存
         self.last_update_time = 0.0
+        self.metrics_data = MetricsData()
 
-        # 初始指标值
-        self.metrics = {
-            "gpu_cache_usage": 0.0,  # GPU设备上的KV缓存使用率
-            "cpu_cache_usage": 0.0,  # CPU设备上的KV缓存使用率
-            "num_running": 0,  # 运行中的请求数量
-            "num_waiting": 0,  # 等待处理的请求数量
-            "num_swapped": 0,  # 已交换到CPU内存的请求数量
-            # 吞吐量指标 GPU和CPU有不同特性
-            "generation_throughput": 0.0,  # 生成阶段吞吐量，GPU通常远高于CPU
-            "prompt_throughput": 0.0,  # 处理输入阶段吞吐量，GPU优势较大
-            # token计数 累计值
-            "prefill_tokens": 0.0,  # 已处理的输入token总数
-            "decode_tokens": 0.0,  # 已生成的token总数
-        }
+        # cumulative stats for throughput aggregation
+        self._cum_prefill_tokens = 0.0
+        self._cum_prefill_time_ns = 0
+        self._cum_decode_tokens = 0.0
+        self._cum_decode_time_ns = 0
 
-        # 定义正则表达式到指标的映射
-        self.metric_patterns = {
-            # 浮点数指标
-            "gpu_cache_usage": (RE_GPU_CACHE, float),
-            "cpu_cache_usage": (RE_CPU_CACHE, float),
-            "generation_throughput": (RE_GEN_THROUGHPUT, float),
-            "prompt_throughput": (RE_PROMPT_THROUGHPUT, float),
-            "prefill_tokens": (RE_PREFILL_TOKENS, float),
-            "decode_tokens": (RE_DECODE_TOKENS, float),
-            # 整数指标
-            "num_running": (RE_RUNNING_REQS, int),
-            "num_waiting": (RE_WAITING_REQS, int),
-            "num_swapped": (RE_SWAPPED_REQS, int),
-        }
-
-    async def update_metrics(self, *, force: bool = False) -> bool:
+    async def update_metrics(self, force: bool = False) -> bool:
         """
         更新指标，只在需要时获取
 
@@ -130,10 +102,7 @@ class ResourceMonitor:
         try:
             current_time = time.time()
             # 如果不是强制刷新且上次更新是在更新间隔内，直接返回缓存的结果
-            if (
-                not force
-                and current_time - self.last_update_time < self.update_interval
-            ):
+            if (not force and current_time - self.last_update_time < self.update_interval):
                 return True
 
             # 发起HTTP请求获取指标
@@ -147,8 +116,26 @@ class ResourceMonitor:
                 metrics_text = response.text
                 self.last_update_time = current_time
 
-                # 解析指标
-                self._parse_metrics(metrics_text)
+                self.metrics_data.gpu_cache_usage = self._parse_metrics(metrics_text, RE_GPU_CACHE, float)
+                self.metrics_data.cpu_cache_usage = self._parse_metrics(metrics_text, RE_CPU_CACHE, float)
+                self.metrics_data.num_running = self._parse_metrics(metrics_text, RE_RUNNING_REQS, int)
+                self.metrics_data.num_waiting = self._parse_metrics(metrics_text, RE_WAITING_REQS, int)
+                self.metrics_data.num_swapped = self._parse_metrics(metrics_text, RE_SWAPPED_REQS, int)
+                
+                # 根据累积的统计数据计算并重置吞吐量指标
+                if self._cum_prefill_time_ns > 0:
+                    self.metrics_data.prefill_throughout = self._cum_prefill_tokens / (self._cum_prefill_time_ns / 1e9)
+                else:
+                    self.metrics_data.prefill_throughout = 0.0
+                self._cum_prefill_tokens = 0.0
+                self._cum_prefill_time_ns = 0
+
+                if self._cum_decode_time_ns > 0:
+                    self.metrics_data.decode_throughout = self._cum_decode_tokens / (self._cum_decode_time_ns / 1e9)
+                else:
+                    self.metrics_data.decode_throughout = 0.0
+                self._cum_decode_tokens = 0.0
+                self._cum_decode_time_ns = 0
                 return True
         except httpx.TimeoutException as e:
             Logger.warning(f"获取指标超时: {e}")
@@ -157,13 +144,11 @@ class ResourceMonitor:
             Logger.warning(f"HTTP错误: {e}")
             return False
 
-    def _parse_metrics(self, metrics_text: str) -> None:
-        """解析Prometheus格式的指标文本"""
-        # 使用定义好的映射遍历处理每个指标
-        for metric_name, (pattern, converter) in self.metric_patterns.items():
-            match = pattern.search(metrics_text)
-            if match:
-                self.metrics[metric_name] = converter(match.group(1))
+    def _parse_metrics(self, metrics_text: str, pattern: Pattern, converter) -> None:
+        match = pattern.search(metrics_text)
+        if match:
+            return converter(match.group(1))
+        return converter("0")
 
     def get_metrics(self) -> dict:
         """
@@ -175,18 +160,39 @@ class ResourceMonitor:
         """
         return {
             # 资源使用
-            "gpu_cache_usage": self.metrics["gpu_cache_usage"],
-            "cpu_cache_usage": self.metrics["cpu_cache_usage"],
-            "num_running": self.metrics["num_running"],
-            "num_waiting": self.metrics["num_waiting"],
-            "num_swapped": self.metrics["num_swapped"],
-            # token统计
-            "prefill_tokens": self.metrics["prefill_tokens"],
-            "decode_tokens": self.metrics["decode_tokens"],
+            "gpu_cache_usage": self.metrics_data.gpu_cache_usage,
+            "cpu_cache_usage": self.metrics_data.cpu_cache_usage,
+            "num_running": self.metrics_data.num_running,
+            "num_waiting": self.metrics_data.num_waiting,
+            "num_swapped": self.metrics_data.num_swapped,
             # 吞吐量
-            "prompt_throughput": self.metrics["prompt_throughput"],
-            "generation_throughput": self.metrics["generation_throughput"],
+            "prefill_throughout": self.metrics_data.prefill_throughout,
+            "decode_throughout": self.metrics_data.decode_throughout,
         }
+    
+    def set_prefill_throughout(self, prefill_throughout: float) -> None:
+        self.metrics_data.prefill_throughout = prefill_throughout
+    
+    def set_decode_throughout(self, decode_throughout: float) -> None:
+        self.metrics_data.decode_throughout = decode_throughout
+
+    def add_prefill_stats(self, tokens: float, time_ns: int) -> None:
+        """Accumulate prefill tokens and time, update throughput."""
+        self._cum_prefill_tokens += tokens
+        self._cum_prefill_time_ns += time_ns
+        if self._cum_prefill_time_ns > 0:
+            self.metrics_data.prefill_throughout = self._cum_prefill_tokens / (self._cum_prefill_time_ns / 1e9)
+        else:
+            self.metrics_data.prefill_throughout = 0.0
+
+    def add_decode_stats(self, tokens: float, time_ns: int) -> None:
+        """Accumulate decode tokens and time, update throughput."""
+        self._cum_decode_tokens += tokens
+        self._cum_decode_time_ns += time_ns
+        if self._cum_decode_time_ns > 0:
+            self.metrics_data.decode_throughout = self._cum_decode_tokens / (self._cum_decode_time_ns / 1e9)
+        else:
+            self.metrics_data.decode_throughout = 0.0
 
 
 class SystemMonitor:
@@ -221,24 +227,27 @@ class SystemMonitor:
         """
         gpu_success = await self.gpu_monitor.update_metrics(force=force)
         cpu_success = await self.cpu_monitor.update_metrics(force=force)
+        Logger.info("SystemMonitor.update_metrics OK")
 
         if gpu_success or cpu_success:
             self.last_update_time = time.time()
 
         return gpu_success, cpu_success
 
-    def get_gpu_metrics(self) -> dict:
+    @property
+    def gpu_metrics(self) -> MetricsData:
         """获取GPU服务指标"""
-        return self.gpu_monitor.get_metrics()
+        return self.gpu_monitor.metrics_data
 
-    def get_cpu_metrics(self) -> dict:
+    @property
+    def cpu_metrics(self) -> MetricsData:
         """获取CPU服务指标"""
-        return self.cpu_monitor.get_metrics()
+        return self.cpu_monitor.metrics_data
 
-    def get_all_metrics(self) -> dict:
+    def get_metrics(self) -> dict:
         """获取所有系统指标"""
         return {
-            "gpu": self.get_gpu_metrics(),
-            "cpu": self.get_cpu_metrics(),
+            "gpu": self.gpu_monitor.get_metrics(),
+            "cpu": self.cpu_monitor.get_metrics(),
             "last_update": self.last_update_time,
         }

@@ -29,13 +29,11 @@ import yaml
 from src.utils.config import (
     CPU_HOST,
     CPU_PORT,
-    DEFAULT_MAX_TOKENS,
-    DEFAULT_MODEL,
-    DEFAULT_TEMPERATURE,
     GPU_HOST,
     GPU_PORT,
     SYSHAX_HOST,
     SYSHAX_PORT,
+    MODEL_NAME,
     load_config,
 )
 
@@ -47,10 +45,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 # 在文件顶部 imports 之后，添加 BASE_DIR
 BASE_DIR = Path(sys.path[0]).resolve()
-
-# 用于比较 keys 列表长度的常量
-KEY_PARTS_TWO = 2
-
 
 def get_version() -> str:
     """从 sysHAX.spec 中读取版本号"""
@@ -114,10 +108,7 @@ def cmd_interfaces() -> None:
 
 def cmd_model() -> None:
     """返回 model name, max_tokens, temperature"""
-    logger.info("model name: %s", DEFAULT_MODEL)
-    logger.info("max_tokens: %d", DEFAULT_MAX_TOKENS)
-    logger.info("temperature: %s", DEFAULT_TEMPERATURE)
-
+    logger.info("model name: %s", MODEL_NAME)
 
 # ---------- cmd_config 辅助函数 ----------
 def _load_cfg(path: Path) -> dict[str, Any]:
@@ -144,99 +135,114 @@ def _write_cfg(path: Path, cfg: dict[str, Any], key: str, value: str) -> None:
         logger.exception("写入配置失败")
         sys.exit(1)
 
+def _set_gpu_host(cfg: dict[str, Any], value: str) -> None:
+    cfg["services"]["gpu"]["host"] = str(value)
 
-def _update_service(cfg: dict[str, Any], service: str, key: str, value: str) -> None:
-    """更新服务（gpu/cpu/conductor）配置"""
-    if service not in cfg["services"] or key not in cfg["services"][service]:
-        logger.error("不支持的键: services.%s.%s", service, key)
+def _set_gpu_port(cfg: dict[str, Any], value: str) -> None:
+    try:
+        cfg["services"]["gpu"]["port"] = int(value)
+    except ValueError:
+        logger.error("GPU 服务端口必须为整数")
         sys.exit(1)
-    old = cfg["services"][service][key]
-    if isinstance(old, int):
-        cfg["services"][service][key] = int(value)
-    elif isinstance(old, float):
-        cfg["services"][service][key] = float(value)
+
+def _set_cpu_host(cfg: dict[str, Any], value: str) -> None:
+    cfg["services"]["cpu"]["host"] = str(value)
+
+def _set_cpu_port(cfg: dict[str, Any], value: str) -> None:
+    try:
+        cfg["services"]["cpu"]["port"] = int(value)
+    except ValueError:
+        logger.error("CPU 服务端口必须为整数")
+        sys.exit(1)
+
+def _set_conductor_host(cfg: dict[str, Any], value: str) -> None:
+    cfg["services"]["conductor"]["host"] = int(value)
+
+def _set_conductor_port(cfg: dict[str, Any], value: str) -> None:
+    try:
+        cfg["services"]["conductor"]["port"] = int(value)
+    except ValueError:
+        logger.error("sysHAX 服务端口必须为整数")
+        sys.exit(1)
+
+def _set_host(cfg: dict[str, Any], value: str) -> None:
+    _set_gpu_host(cfg, value)
+    _set_cpu_host(cfg, value)
+    _set_conductor_host(cfg, value)
+
+def _set_model_name(cfg: dict[str, Any], value: str) -> None:
+    try:
+        cfg["models"]["default"] = str(value)
+    except ValueError:
+        logger.error("模型名称必须为字符串")
+        sys.exit(1)
+
+def _set_gpu_kv_cache_threashold(cfg: dict[str, Any], value: str) -> None:
+    try:
+        cfg["decider"]["gpu_cache_threshold"] = float(value)
+    except ValueError:
+        logger.error("GPU 缓存使用率阈值必须为浮点数")
+        sys.exit(1)
+
+def _set_gpu_throughput_lower_bound(cfg: dict[str, Any], value: str) -> None:
+    try:
+        cfg["decider"]["gpu_throughput_lower_bound"] = float(value)
+    except ValueError:
+        logger.error("GPU 吞吐量阈值必须为浮点数")
+        sys.exit(1)
+
+def _set_gpu_max_batch_size(cfg: dict[str, Any], value: str) -> None:
+    try:
+        cfg["decider"]["gpu_max_batch_size"] = int(value)
+    except ValueError:
+        logger.error("GPU 侧最大并发量必须为整数")
+        sys.exit(1)
+
+def _set_cpu_max_batch_size(cfg: dict[str, Any], value: str) -> None:
+    try:
+        cfg["decider"]["cpu_max_batch_size"] = int(value)
+    except ValueError:
+        logger.error("CPU 侧最大并发量必须为整数")
+        sys.exit(1)
+
+def _set_monitor_interval(cfg: dict[str, Any], value: str) -> None:
+    try:
+        cfg["monitor"]["interval"] = int(value)
+    except ValueError:
+        logger.error("监控间隔必须为整数")
+        sys.exit(1)
+
+def _set_request_timeout(cfg: dict[str, Any], value: str) -> None:
+    try:
+        cfg["system"]["request_timeout"] = int(value)
+    except ValueError:
+        logger.error("请求超时时间必须为整数")
+        sys.exit(1)
+
+HANDLERS = {
+    "host": _set_host,
+    "gpu.host": _set_gpu_host,
+    "gpu.port": _set_gpu_port,
+    "cpu.host": _set_cpu_host,
+    "cpu.port": _set_cpu_port,
+    "conductor.host": _set_conductor_host,
+    "conductor.port": _set_conductor_port,
+    "model_name": _set_model_name,
+    "gpu_kv_cache_threashold": _set_gpu_kv_cache_threashold,
+    "gpu_throughput_lower_bound": _set_gpu_throughput_lower_bound,
+    "gpu_max_batch_size": _set_gpu_max_batch_size,
+    "cpu_max_batch_size": _set_cpu_max_batch_size,
+    "monitor.interval": _set_monitor_interval,
+    "request_timeout": _set_request_timeout,
+}
+
+def _handle(cfg: dict[str, Any], key: str, value: str) -> None:
+    """处理config"""
+    handler = HANDLERS.get(key)
+    if handler:
+        handler(cfg, value)
     else:
-        cfg["services"][service][key] = value
-
-
-def _update_section(cfg: dict[str, Any], section: str, key: str, value: str) -> None:
-    """更新通用配置节"""
-    if section not in cfg or key not in cfg[section]:
-        logger.error("不支持的键: %s.%s", section, key)
-        sys.exit(1)
-    old = cfg[section][key]
-    if isinstance(old, int):
-        cfg[section][key] = int(value)
-    elif isinstance(old, float):
-        cfg[section][key] = float(value)
-    else:
-        cfg[section][key] = value
-
-
-def _update_model(cfg: dict[str, Any], key: str, value: str) -> None:
-    """更新模型配置"""
-    if key == "model":
-        cfg["models"]["default"] = value
-    elif key == "max_tokens":
-        cfg["models"]["params"]["max_tokens"] = int(value)
-    elif key == "temperature":
-        cfg["models"]["params"]["temperature"] = float(value)
-    elif key == "test_prompt":
-        cfg["models"]["params"]["test_prompt"] = value
-    elif key == "test_tokens":
-        cfg["models"]["params"]["test_tokens"] = int(value)
-    else:
-        logger.error("不支持的键: %s", key)
-        sys.exit(1)
-
-
-def _handle_services(cfg: dict[str, Any], keys: list[str], value: str) -> None:
-    """处理 services.* 修改"""
-    if len(keys) == 1 and keys[0] == "host":
-        for svc in cfg["services"]:
-            _update_service(cfg, svc, "host", value)
-    elif len(keys) == KEY_PARTS_TWO:
-        svc, sub = keys
-        _update_service(cfg, svc, sub, value)
-    else:
-        logger.error("不支持的键: services.%s", ".".join(keys))
-        sys.exit(1)
-
-
-def _handle_models(cfg: dict[str, Any], keys: list[str], value: str) -> None:
-    """处理 models.* 修改"""
-    if len(keys) == 1 and keys[0] == "default":
-        _update_section(cfg, "models", "default", value)
-    elif len(keys) == KEY_PARTS_TWO and keys[0] == "params":
-        _update_model(cfg, keys[1], value)
-    else:
-        logger.error("不支持的键: models.%s", ".".join(keys))
-        sys.exit(1)
-
-
-def _handle_system(cfg: dict[str, Any], keys: list[str], value: str) -> None:
-    """处理 system.* 修改"""
-    if len(keys) != 1:
-        logger.error("不支持的键: system.%s", ".".join(keys))
-        sys.exit(1)
-    _update_section(cfg, "system", keys[0], value)
-
-
-def _handle_decider(cfg: dict[str, Any], keys: list[str], value: str) -> None:
-    """处理 decider.* 修改"""
-    if len(keys) != 1:
-        logger.error("不支持的键: decider.%s", ".".join(keys))
-        sys.exit(1)
-    _update_section(cfg, "decider", keys[0], value)
-
-
-def _handle_monitor(cfg: dict[str, Any], keys: list[str], value: str) -> None:
-    """处理 monitor.* 修改"""
-    if len(keys) != 1:
-        logger.error("不支持的键: monitor.%s", ".".join(keys))
-        sys.exit(1)
-    _update_section(cfg, "monitor", keys[0], value)
-
+        logger.warning("不支持的键：%s", key)
 
 def cmd_config(args: argparse.Namespace) -> None:
     """设置配置项"""
@@ -247,19 +253,7 @@ def cmd_config(args: argparse.Namespace) -> None:
         cmd_init()
     cfg = _load_cfg(cfg_path)
 
-    parts = key.split(".")
-    handlers = {
-        "services": _handle_services,
-        "models": _handle_models,
-        "system": _handle_system,
-        "decider": _handle_decider,
-        "monitor": _handle_monitor,
-    }
-    head, *rest = parts
-    if head not in handlers:
-        logger.error("不支持的键: %s", key)
-        sys.exit(1)
-    handlers[head](cfg, rest, value)
+    _handle(cfg, key, value)
     _write_cfg(cfg_path, cfg, key, value)
 
 
@@ -298,33 +292,23 @@ def main() -> None:
         usage="syshax config <key> <value>",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="""可用 <key> 列表:
-  services.host                        同时更新所有服务（gpu/cpu/conductor）的 host
-  services.gpu.host                    GPU 服务 host
-  services.gpu.port                    GPU 服务 port
-  services.cpu.host                    CPU 服务 host
-  services.cpu.port                    CPU 服务 port
-  services.conductor.host              Conductor 服务 host
-  services.conductor.port              Conductor 服务 port
-
-  models.default                       默认模型名称
-  models.params.max_tokens             生成的最大 token 数量
-  models.params.temperature            随机性参数 (0.0–1.0)
-  models.params.test_prompt            性能测试使用的提示语
-  models.params.test_tokens            性能测试生成的 token 数量
-
-  system.request_timeout               请求超时时间（秒）
-
-  decider.max_num_seqs                 最大并发序列数
-  decider.gpu_cache_threshold          GPU 缓存使用率阈值（%）
-  decider.cpu_throughput_threshold     CPU 吞吐量阈值
-  decider.token_limit_multiplier       任务转移到 CPU 的 token 限制倍数
-  decider.token_limit_min              任务转移到 CPU 的 token 限制最小值
-  decider.token_limit_max              任务转移到 CPU 的 token 限制最大值
-
-  monitor.interval                     监控间隔（秒）
-""",
+            host                                 同时更新所有服务（gpu/cpu/conductor）的 host
+            gpu.host                             GPU 服务 host
+            gpu.port                             GPU 服务 port
+            cpu.host                             CPU 服务 host
+            cpu.port                             CPU 服务 port
+            conductor.host                       sysHAX 服务 host
+            conductor.port                       sysHAX 服务 port
+            model_name                           默认模型名称
+            gpu_kv_cache_threashold              GPU 缓存使用率阈值（%）
+            gpu_throughput_lower_bound           GPU 吞吐量阈值（tokens/s）
+            gpu_max_batch_size                   GPU 侧最大并发量
+            cpu_max_batch_size                   CPU 侧最大并发量
+            monitor.interval                     监控间隔（秒）
+            request_timeout                      请求超时时间（秒）
+            """,
     )
-    parser_config.add_argument("key", help="配置键，例如 services.gpu.port 或 models.params.temperature")
+    parser_config.add_argument("key", help="配置键，例如 gpu.port 或 model_name")
     parser_config.add_argument("value", help="配置值")
 
     args = parser.parse_args()
@@ -344,7 +328,6 @@ def main() -> None:
         cmd_config(args)
     else:
         parser.print_help()
-
 
 if __name__ == "__main__":
     main()
