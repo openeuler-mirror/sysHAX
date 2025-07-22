@@ -88,6 +88,11 @@ class AdaptiveDecoder:
             if decision.get("device") == "GPU":
                 # GPU 全流程
                 response = await self.default_request(data)
+                if response.get("choices") and response["choices"][0]["finish_reason"] == "scheduled":
+                    completion_id = response["id"]
+                    decision = await self.scheduler.scheduler()
+                    decision["device"] = "CPU"
+                    response = await self.decode_request(data.copy(), completion_id, decision)
             else:
                 # PD 分离
                 prefill = await self.prefill_request(data.copy())
@@ -104,9 +109,18 @@ class AdaptiveDecoder:
         try:
             decision = await self.scheduler.scheduler()
             if decision.get("device") == "GPU":
+                raw_data = bytearray()
                 # GPU 全流程流式，直接透传所有 SSE chunk
                 async for chunk in self.default_request_stream(data):
                     yield chunk
+                    raw_data.extend(chunk)
+                last_event = self._parse_sse_buffer(raw_data)
+                if(self._check_scheduled_status(last_event)):
+                    completion_id = last_event["id"]
+                    decision = await self.scheduler.scheduler()
+                    decision["device"] = "CPU"
+                    async for chunk in self.decode_request_stream(data.copy(), completion_id, decision):
+                        yield chunk
             else:
                 # PD 分离流式解码，委托给通用方法
                 prefill = await self.prefill_request(data.copy())
@@ -412,3 +426,62 @@ class AdaptiveDecoder:
         # 逐块输出
         async for chunk in self.decode_request_stream(data.copy(), completion_id, decision):
             yield chunk
+
+    def _parse_sse_buffer(self, raw_data: bytes) -> dict | None:
+        """
+        逆向扫描SSE流，定位首个含"finish_reason"字段的事件并解析。
+        """
+        if not raw_data:
+            return None
+
+        end_index = len(raw_data)
+        event_count = 0
+        max_events_to_scan = 10  # 最大逆向扫描事件数
+        
+        while event_count < max_events_to_scan and end_index > 0:
+            start_index = raw_data.rfind(b"\n\n", 0, end_index - 1)
+            event_block = raw_data[start_index + 2: end_index] \
+                if start_index != -1 else raw_data[:end_index]
+
+            data_lines = []
+            for line in event_block.splitlines():
+                line = line.strip()
+                if line.startswith(b"data:"):
+                    data_lines.append(line[len("data:"):])  # 移除"data:"前缀
+
+            if not data_lines:
+                end_index = start_index
+                event_count += 1
+                continue
+
+            try:
+                combined_data = b"\n".join(data_lines).decode("utf-8")
+                event_dict = json.loads(combined_data)
+                if "finish_reason" in event_dict:
+                    return event_dict
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                pass
+
+            end_index = start_index
+            event_count += 1
+
+        Logger.warning("未找到含'finish_reason'字段的有效事件")
+        return None
+
+    def _check_scheduled_status(self, event_data: Any) -> bool:
+        """检查并处理scheduled状态"""
+        if not event_data:
+            return
+        try:
+            if (
+                isinstance(event_data, dict) and
+                "choices" in event_data and
+                isinstance(event_data["choices"], list) and
+                len(event_data["choices"]) > 0 and
+                event_data["choices"][0].get("finish_reason") == "scheduled"
+            ):
+                return True
+            else:
+                return False
+        except Exception as e:
+            return False
