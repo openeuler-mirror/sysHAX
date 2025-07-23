@@ -41,7 +41,7 @@ class Scheduler:
         """
         self.system_monitor: SystemMonitor = system_monitor
 
-    async def scheduler(self) -> dict:
+    def scheduler(self) -> dict:
         """
         做出调度决策，返回设备类型和token限制
 
@@ -53,7 +53,7 @@ class Scheduler:
 
         """
         # 更新系统指标
-        await self.system_monitor.update_metrics()
+        self.system_monitor.update_metrics()
 
         gpu_cache_usage = self.system_monitor.gpu_metrics.gpu_cache_usage * 100  # 转换为百分比
         gpu_throughput = self.system_monitor.gpu_metrics.decode_throughout # tokens/s
@@ -97,10 +97,9 @@ class Scheduler:
             else:
                 from src.utils.config import DEFAULT_TOKEN_LIMIT
                 self.token_limit = DEFAULT_TOKEN_LIMIT
+                self.token_limit = self.token_limit * 10
             decision = {"device": "CPU", "token_limit": self.token_limit}
             log_msg += "执行PD分离。"
-            from src.utils.config import DEFAULT_TOKEN_LIMIT
-            Logger.info_console(f"DEFAULT_TOKEN_LIMIT: {DEFAULT_TOKEN_LIMIT}")
 
         Logger.info(f"\033[1;32m{log_msg}\033[0m")
         Logger.info(f"\033[1;32m调度决策: {decision}\033[0m")

@@ -138,13 +138,13 @@ async def pd_disagg(request: Request) -> Any:
 
 
 @router.get("/metrics", response_model=None)
-async def get_metrics(request: Request) -> Union[JSONResponse, dict[str, Any]]:
+def get_metrics(request: Request) -> Union[JSONResponse, dict[str, Any]]:
     """返回当前的资源指标"""
     system_monitor = request.app.state.monitor
     if system_monitor is None:
         raise HTTPException(status_code=500, detail="系统监控器未初始化")
 
-    await system_monitor.update_metrics()
+    system_monitor.update_metrics()
 
     # 获取GPU和CPU指标
     gpu_metrics = system_monitor.gpu_metrics()

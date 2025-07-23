@@ -84,13 +84,13 @@ class AdaptiveDecoder:
         3. 返回最终推理结果 response。
         """
         try:
-            decision = await self.scheduler.scheduler()
+            decision = self.scheduler.scheduler()
             if decision.get("device") == "GPU":
                 # GPU 全流程
                 response = await self.default_request(data)
                 if response.get("choices") and response["choices"][0]["finish_reason"] == "scheduled":
                     completion_id = response["id"]
-                    decision = await self.scheduler.scheduler()
+                    decision = self.scheduler.scheduler()
                     decision["device"] = "CPU"
                     response = await self.decode_request(data.copy(), completion_id, decision)
             else:
@@ -107,7 +107,7 @@ class AdaptiveDecoder:
     async def chat_completion_stream(self, data: dict[str, Any]) -> AsyncGenerator[bytes, None]:
         """处理 /v1/chat/completions 接口的流式请求。"""
         try:
-            decision = await self.scheduler.scheduler()
+            decision = self.scheduler.scheduler()
             if decision.get("device") == "GPU":
                 raw_data = bytearray()
                 # GPU 全流程流式，直接透传所有 SSE chunk
@@ -117,7 +117,7 @@ class AdaptiveDecoder:
                 last_event = self._parse_sse_buffer(raw_data)
                 if(self._check_scheduled_status(last_event)):
                     completion_id = last_event["id"]
-                    decision = await self.scheduler.scheduler()
+                    decision = self.scheduler.scheduler()
                     decision["device"] = "CPU"
                     async for chunk in self.decode_request_stream(data.copy(), completion_id, decision):
                         yield chunk
@@ -265,7 +265,6 @@ class AdaptiveDecoder:
             last_generated_text = step_res.get("generated_text", "")
 
             last_step_res = step_res.get("response", {})
-            decode_data["max_tokens"] = max_tokens - total_token_count if max_tokens > total_token_count else 1
 
             if finish_reason == "scheduled":
                 curr_decision = await self.scheduler.scheduler()
@@ -301,6 +300,8 @@ class AdaptiveDecoder:
             token_limit = curr_decision.get("token_limit", 0)
             if device == "GPU" or token_limit == 0:
                 device, token_limit = "GPU", max_tokens + 1
+            if token_limit <= 0:
+                break
 
             # 构造请求
             request_data = decode_data.copy()
@@ -333,11 +334,10 @@ class AdaptiveDecoder:
 
             # 更新状态，为下一轮做准备
             last_generated_text = generated_text_acc
-            max_tokens -= token_count
             total_token_count += token_count
             decode_data["max_tokens"] = max_tokens
             if finish_reason == "scheduled":
-                curr_decision = await self.scheduler.scheduler()
+                curr_decision = self.scheduler.scheduler()
             # accumulate per-segment decode stats for aggregated throughput
             segment_time = time.time_ns() - segment_start
             self.system_monitor.gpu_monitor.add_decode_stats(token_count, segment_time) if device == "GPU" else \
@@ -457,7 +457,7 @@ class AdaptiveDecoder:
             try:
                 combined_data = b"\n".join(data_lines).decode("utf-8")
                 event_dict = json.loads(combined_data)
-                if "finish_reason" in event_dict:
+                if "choices" in event_dict and "finish_reason" in event_dict["choices"][0]:
                     return event_dict
             except (UnicodeDecodeError, json.JSONDecodeError):
                 pass

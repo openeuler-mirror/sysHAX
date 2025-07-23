@@ -63,7 +63,7 @@ class PerformanceTester:
         Logger.info("开始基准测试...")
         try:
             # 0. 准备 decode 数据并获取原始 max_tokens
-            test_data = await self._prepare_test_data()
+            test_data = self._prepare_test_data()
             max_tokens = test_data.get("max_tokens", self.test_tokens)
 
             # 1. GPU 测试（default_request）
@@ -71,7 +71,7 @@ class PerformanceTester:
             gpu_res = await self.adaptive_decoder.default_request(test_data)
             gpu_time = time.time_ns() - start_time
             await asyncio.sleep(1)
-            gpu_tp = await self._check_throughput("gpu", gpu_res, gpu_time / 1e9)
+            gpu_tp = self._check_throughput("gpu", gpu_res, gpu_time / 1e9)
             Logger.info(
                 f"GPU性能测试: 耗时={gpu_time / 1e9:.3f}s, 吞吐量={gpu_tp:.2f}tokens/s",
             )
@@ -91,7 +91,7 @@ class PerformanceTester:
             )
             cpu_time = time.time_ns() - start_time
             await asyncio.sleep(1)
-            cpu_tp = await self._check_throughput("cpu", cpu_res, cpu_time / 1e9)
+            cpu_tp = self._check_throughput("cpu", cpu_res, cpu_time / 1e9)
             set_token_limit(int(cpu_tp))
             Logger.info(
                 f"CPU性能测试: 耗时={cpu_time / 1e9:.3f}s, 吞吐量={cpu_tp:.2f}tokens/s",
@@ -101,7 +101,7 @@ class PerformanceTester:
         except (ValueError, KeyError) as e:
             Logger.error(f"基准测试失败: {e!s}")
 
-    async def _prepare_test_data(self) -> dict:
+    def _prepare_test_data(self) -> dict:
         """
         准备测试数据，在GPU上执行prefill
 
@@ -132,15 +132,15 @@ class PerformanceTester:
         else:
             return test_data
 
-    async def _get_throughput_metrics(self, device: str) -> float:
+    def _get_throughput_metrics(self, device: str) -> float:
         """从监控器获取指定设备的吞吐量指标"""
-        await self.system_monitor.update_metrics(force=True)
+        self.system_monitor.update_metrics(force=True)
         metrics = self.system_monitor.gpu_metrics if device == "gpu" else self.system_monitor.cpu_metrics
         return metrics.decode_throughout
 
-    async def _check_throughput(self, device: str, res: dict, decode_time: float) -> float:
+    def _check_throughput(self, device: str, res: dict, decode_time: float) -> float:
         """校验并返回吞吐量，比较监控数据与计算值"""
-        native_throughput = await self._get_throughput_metrics(device)
+        native_throughput = self._get_throughput_metrics(device)
         # 计算值
         tokens = res.get("usage", {}).get("completion_tokens", 0)
         t = decode_time
