@@ -88,7 +88,7 @@ class ResourceMonitor:
         self._cum_decode_tokens = 0.0
         self._cum_decode_time_ns = 0
 
-    async def update_metrics(self, force: bool = False) -> bool:
+    def update_metrics(self, force: bool = False) -> bool:
         """
         更新指标，只在需要时获取
 
@@ -106,8 +106,8 @@ class ResourceMonitor:
                 return True
 
             # 发起HTTP请求获取指标
-            async with httpx.AsyncClient() as client:
-                response = await client.get(self.metrics_url, timeout=3.0)
+            with httpx.Client() as client:
+                response = client.get(self.metrics_url, timeout=3.0)
 
                 if response.status_code != httpx.codes.OK:
                     Logger.warning(f"获取指标失败: HTTP {response.status_code}")
@@ -214,7 +214,7 @@ class SystemMonitor:
         self.last_update_time = 0.0
         Logger.info("系统监控器初始化完成")
 
-    async def update_metrics(self, *, force: bool = False) -> tuple[bool, bool]:
+    def update_metrics(self, *, force: bool = False) -> tuple[bool, bool]:
         """
         同时更新GPU和CPU指标
 
@@ -225,8 +225,8 @@ class SystemMonitor:
             元组 (GPU更新成功, CPU更新成功)
 
         """
-        gpu_success = await self.gpu_monitor.update_metrics(force=force)
-        cpu_success = await self.cpu_monitor.update_metrics(force=force)
+        gpu_success = self.gpu_monitor.update_metrics(force=force)
+        cpu_success = self.cpu_monitor.update_metrics(force=force)
         Logger.info("SystemMonitor.update_metrics OK")
 
         if gpu_success or cpu_success:
