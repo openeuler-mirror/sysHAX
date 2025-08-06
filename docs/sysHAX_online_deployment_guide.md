@@ -169,15 +169,22 @@ NUMA:
 
 ### sysHAX安装
 
-sysHAX安装：
+sysHAX安装有两种方式，可以通过dnf安装rpm包。注意，使用该方法需要将openEuler升级至openEuler 24.03 LTS SP2及以上版本：
 
 ```shell
 dnf install sysHAX
 ```
 
+或者直接使用本仓库：
+
+```shell
+git clone -b v0.2.0 https://gitee.com/openeuler/sysHAX.git
+```
+
 在启动sysHAX之前需要进行一些基础配置：
 
 ```shell
+# 使用 dnf install sysHAX 安装sysHAX时
 syshax init
 syshax config services.gpu.port 8001
 syshax config services.cpu.port 8002
@@ -185,12 +192,27 @@ syshax config services.conductor.port 8010
 syshax config models.default ds-32b
 ```
 
-此外，也可以通过 `syshax config --help` 来查看全部配置命令。
+```shell
+# 使用 git clone -b v0.2.0 https://gitee.com/openeuler/sysHAX.git 时
+python3 cli.py init
+python3 cli.py config services.gpu.port 8001
+python3 cli.py config services.cpu.port 8002
+python3 cli.py config services.conductor.port 8010
+python3 cli.py config models.default ds-32b
+```
+
+此外，也可以通过 `syshax config --help` 或者 `python3 cli.py config --help` 来查看全部配置命令。
 
 配置完成后，通过如下命令启动sysHAX服务：
 
 ```shell
+# 使用 dnf install sysHAX 安装sysHAX时
 syshax run
+``` 
+
+```shell
+# 使用 git clone -b v0.2.0 https://gitee.com/openeuler/sysHAX.git 时
+python3 main.py
 ```
 
 启动sysHAX服务的时候，会进行服务连通性测试。sysHAX符合openAPI标准，待服务启动完成后，即可API来调用大模型服务。可通过如下脚本进行测试：
