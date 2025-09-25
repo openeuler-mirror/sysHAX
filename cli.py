@@ -177,39 +177,11 @@ def _set_model_name(cfg: dict[str, Any], value: str) -> None:
         logger.error("模型名称必须为字符串")
         sys.exit(1)
 
-def _set_gpu_kv_cache_threashold(cfg: dict[str, Any], value: str) -> None:
-    try:
-        cfg["decider"]["gpu_cache_threshold"] = float(value)
-    except ValueError:
-        logger.error("GPU 缓存使用率阈值必须为浮点数")
-        sys.exit(1)
-
-def _set_gpu_throughput_lower_bound(cfg: dict[str, Any], value: str) -> None:
-    try:
-        cfg["decider"]["gpu_throughput_lower_bound"] = float(value)
-    except ValueError:
-        logger.error("GPU 吞吐量阈值必须为浮点数")
-        sys.exit(1)
-
-def _set_gpu_max_batch_size(cfg: dict[str, Any], value: str) -> None:
-    try:
-        cfg["decider"]["gpu_max_batch_size"] = int(value)
-    except ValueError:
-        logger.error("GPU 侧最大并发量必须为整数")
-        sys.exit(1)
-
 def _set_cpu_max_batch_size(cfg: dict[str, Any], value: str) -> None:
     try:
         cfg["decider"]["cpu_max_batch_size"] = int(value)
     except ValueError:
         logger.error("CPU 侧最大并发量必须为整数")
-        sys.exit(1)
-
-def _set_monitor_interval(cfg: dict[str, Any], value: str) -> None:
-    try:
-        cfg["monitor"]["interval"] = int(value)
-    except ValueError:
-        logger.error("监控间隔必须为整数")
         sys.exit(1)
 
 def _set_request_timeout(cfg: dict[str, Any], value: str) -> None:
@@ -228,11 +200,7 @@ HANDLERS = {
     "conductor.host": _set_conductor_host,
     "conductor.port": _set_conductor_port,
     "model_name": _set_model_name,
-    "gpu_kv_cache_threashold": _set_gpu_kv_cache_threashold,
-    "gpu_throughput_lower_bound": _set_gpu_throughput_lower_bound,
-    "gpu_max_batch_size": _set_gpu_max_batch_size,
     "cpu_max_batch_size": _set_cpu_max_batch_size,
-    "monitor.interval": _set_monitor_interval,
     "request_timeout": _set_request_timeout,
 }
 
@@ -299,12 +267,8 @@ def main() -> None:
             cpu.port                             CPU 服务 port
             conductor.host                       sysHAX 服务 host
             conductor.port                       sysHAX 服务 port
-            model_name                           默认模型名称
-            gpu_kv_cache_threashold              GPU 缓存使用率阈值（%）
-            gpu_throughput_lower_bound           GPU 吞吐量阈值（tokens/s）
-            gpu_max_batch_size                   GPU 侧最大并发量
+            model_name                           模型名称
             cpu_max_batch_size                   CPU 侧最大并发量
-            monitor.interval                     监控间隔（秒）
             request_timeout                      请求超时时间（秒）
             """,
     )

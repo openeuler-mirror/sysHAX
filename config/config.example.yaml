@@ -25,15 +25,5 @@ system:
   request_timeout: 600
 
 decider:
-  # GPU kvcache使用率阈值
-  gpu_kv_cache_threshold: 90
-  # GPU 吞吐量下限
-  gpu_throughput_lower_bound: 10
-  # GPU 最大并发量
-  gpu_max_batch_size: 256
   # CPU 最大并发量
   cpu_max_batch_size: 256
-
-monitor:
-  # 监控间隔(秒)
-  interval: 1

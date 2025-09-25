@@ -17,52 +17,17 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, NoReturn, Union
-from typing import AsyncGenerator
-
 import httpx
+import asyncio
+from typing import Any, NoReturn
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from src.utils.config import GPU_HOST, GPU_PORT
+from src.utils.config import GPU_HOST, GPU_PORT, REQUEST_TIMEOUT
 from src.utils.logger import Logger
-from src.workflow import AdaptiveDecoderError
 
 # 创建路由器
 router = APIRouter()
-
-# 添加流式返回给客户端的性能指标
-async def stream_with_metrics(generator: AsyncGenerator[bytes, None]) -> AsyncGenerator[bytes, None]:
-    start_time = time.time_ns()
-    first_token_time = None
-    tokens = 0
-    async for chunk in generator:
-        tokens += 1
-        if first_token_time is None:
-            first_token_time = time.time_ns()
-        yield chunk
-    time_used = time.time_ns() - start_time
-    metrics = {
-        "TTFB": f"{round((first_token_time - start_time) / 1e9, 3)}s",
-        "time_used": f"{round(time_used / 1e9, 3)}s",
-        "tokens": tokens,
-        "throughput": f"{round(tokens / (time_used / 1e9), 3) if time_used > 0 else 0}tokens/s",
-    }
-    # SSE 格式返回 metrics 事件
-    yield f"data: {json.dumps({'metrics': metrics})}\n\n".encode()
-
-async def normal_with_metrics(generator: AsyncGenerator[bytes, None]) -> dict:
-    start_time = time.time_ns()
-    result = await generator
-    time_used = time.time_ns() - start_time
-    tokens = result.get("usage", {}).get("completion_tokens", 0)
-    metrics = {
-        "time_used": f"{round(time_used / 1e9, 3)}s",
-        "tokens": tokens,
-        "throughput": f"{round(tokens / (time_used / 1e9), 3) if time_used > 0 else 0}tokens/s",
-    }
-    result["metrics"] = metrics
-    return result
 
 def raise_http_exception(status_code: int, detail: str) -> NoReturn:
     """抛出HTTP异常，返回指定状态码和错误信息"""
@@ -70,116 +35,45 @@ def raise_http_exception(status_code: int, detail: str) -> NoReturn:
 
 
 @router.post("/v1/chat/completions", response_model=None)
-async def completions(request: Request) -> Any:
-    """
-    处理完成请求
-
-    实现分离前缀填充和自适应解码流程：
-    1. 发送prefill请求到GPU服务，设置prefill_then_swapout=True
-    2. 根据资源情况和请求特征，执行自适应解码
-    """
-    adaptive_decoder = request.app.state.adaptive_decoder
-    if adaptive_decoder is None:
+async def completions(request: Request) -> StreamingResponse:
+    scheduler = request.app.state.scheduler
+    if scheduler is None:
         raise HTTPException(status_code=500, detail="自适应解码器未初始化")
 
     try:
         data: dict[str, Any] = await request.json()
-        # 支持流式 PD 分离和 GPU 全流程
-        if data.get("stream"):
-            gen = adaptive_decoder.chat_completion_stream(data)
-            return StreamingResponse(
-                stream_with_metrics(gen),
-                media_type="text/event-stream",
-            )
-        gen = adaptive_decoder.chat_completion(data)
-        return await normal_with_metrics(gen)
+        is_stream = data.get("stream", False)
+        output_queue = await scheduler.submit_task(data)
     except json.JSONDecodeError:
-        raise_http_exception(400, "无效请求")
-    except AdaptiveDecoderError as e:
-        Logger.error(f"自适应解码器异常: {e!s}", exc_info=True)
-        raise_http_exception(500, f"解码器内部错误: {e!s}")
-    except httpx.TimeoutException as e:
-        Logger.error(f"请求超时: {e!s}", exc_info=True)
-        raise_http_exception(504, "请求超时")
-    except (httpx.RequestError, ValueError, KeyError, AttributeError) as e:
-        Logger.error(f"处理请求出错: {e!s}", exc_info=True)
-        raise_http_exception(500, f"内部服务器错误: {e!s}")
+        raise HTTPException(status_code=400, detail="无效JSON")
 
+    if is_stream:
+        async def event_generator():
+            try:
+                while True:
+                    chunk = await output_queue.get()
+                    if chunk is None:  # 流结束或出错
+                        break
+                    yield chunk
+            except asyncio.CancelledError:
+                Logger.info("客户端断开连接，停止生成")
+                raise
 
-@router.post("/v1/chat/pd_disagg", response_model=None)
-async def pd_disagg(request: Request) -> Any:
-    """强制执行：GPU prefill + CPU decode"""
-    adaptive_decoder = request.app.state.adaptive_decoder
-    if adaptive_decoder is None:
-        raise HTTPException(status_code=500, detail="自适应解码器未初始化")
-
-    try:
-        data: dict[str, Any] = await request.json()
-        # 支持流式 PD 分离和 GPU 全流程
-        if data.get("stream"):
-            gen = adaptive_decoder.pd_disagg_completion_stream(data)
-            return StreamingResponse(
-                stream_with_metrics(gen),
-                media_type="text/event-stream",
-            )
-        gen = adaptive_decoder.pd_disagg_completion(data)
-        return await normal_with_metrics(gen)
-    except json.JSONDecodeError:
-        raise_http_exception(400, "无效请求")
-    except AdaptiveDecoderError as e:
-        Logger.error(f"自适应解码器异常: {e!s}", exc_info=True)
-        raise_http_exception(500, f"解码器内部错误: {e!s}")
-    except httpx.TimeoutException as e:
-        Logger.error(f"请求超时: {e!s}", exc_info=True)
-        raise_http_exception(504, "请求超时")
-    except (httpx.RequestError, ValueError, KeyError, AttributeError) as e:
-        Logger.error(f"处理请求出错: {e!s}", exc_info=True)
-        raise_http_exception(500, f"内部服务器错误: {e!s}")
-
-
-@router.get("/metrics", response_model=None)
-def get_metrics(request: Request) -> Union[JSONResponse, dict[str, Any]]:
-    """返回当前的资源指标"""
-    system_monitor = request.app.state.monitor
-    if system_monitor is None:
-        raise HTTPException(status_code=500, detail="系统监控器未初始化")
-
-    system_monitor.update_metrics()
-
-    # 获取GPU和CPU指标
-    gpu_metrics = system_monitor.gpu_metrics()
-    cpu_metrics = system_monitor.cpu_metrics()
-
-    Logger.info(f"GPU指标: {gpu_metrics}")
-    Logger.info(f"CPU指标: {cpu_metrics}")
-
-    # 格式化数值以提高可读性
-    return JSONResponse(
-        content={
-            "gpu": {
-                "cache_usage": f"{gpu_metrics['gpu_cache_usage']:.2f}",
-                "num_running": gpu_metrics["num_running"],
-                "num_waiting": gpu_metrics["num_waiting"],
-                "num_swapped": gpu_metrics["num_swapped"],
-                "prompt_throughput": f"{gpu_metrics['prompt_throughput']:.2f} tokens/s",
-                "generation_throughput": f"{gpu_metrics['generation_throughput']:.2f} tokens/s",
-            },
-            "cpu": {
-                "cache_usage": f"{cpu_metrics['cpu_cache_usage']:.2f}",
-                "num_running": cpu_metrics["num_running"],
-                "num_waiting": cpu_metrics["num_waiting"],
-                "num_swapped": cpu_metrics["num_swapped"],
-                "prompt_throughput": f"{cpu_metrics['prompt_throughput']:.2f} tokens/s",
-                "generation_throughput": f"{cpu_metrics['generation_throughput']:.2f} tokens/s",
-            },
-            "system": {
-                "last_update": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(system_monitor.last_update_time)),
-            },
-        },
-        # 设置缩进使JSON输出格式化
-        media_type="application/json",
-    )
-
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Content-Type": "text/event-stream",
+            }
+        )
+    else:
+        final_chunk = await output_queue.get()
+        return Response(
+            content=final_chunk,
+            media_type="application/json"
+        )
 
 @router.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
 async def fallback_to_gpu(request: Request, full_path: str) -> Response:
@@ -189,7 +83,7 @@ async def fallback_to_gpu(request: Request, full_path: str) -> Response:
         body = await request.body()
         headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
         async with httpx.AsyncClient() as client:
-            resp = await client.request(request.method, url, headers=headers, content=body, timeout=300)
+            resp = await client.request(request.method, url, headers=headers, content=body, timeout=REQUEST_TIMEOUT)
     except httpx.TimeoutException as e:
         Logger.error(f"转发到 GPU 服务超时: {e!s}", exc_info=True)
         raise HTTPException(status_code=504, detail="GPU 服务请求超时") from e
