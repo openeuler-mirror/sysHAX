@@ -20,6 +20,7 @@ import os
 from collections.abc import MutableMapping
 from pathlib import Path
 
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 class CustomLoggerAdapter(logging.LoggerAdapter):
     """自定义日志适配器，添加文件名和行号信息"""
@@ -128,15 +129,6 @@ class Logger:
             ):
                 # 只修改控制台处理器的级别
                 handler.setLevel(level)
-
-    @classmethod
-    def info_console(cls, msg: str) -> None:
-        """记录一般信息到日志文件并同时打印到终端"""
-        # 写入日志文件
-        cls.adapter.info(msg)
-        # 打印到终端 stdout
-        print(msg, flush=True)
-
 
 # 根据环境变量设置日志级别
 if os.environ.get("DEBUG", "").lower() in ("true", "1", "yes"):

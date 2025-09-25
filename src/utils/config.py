@@ -72,19 +72,9 @@ try:
     MODEL_NAME = CONFIG["models"]["model_name"]
 
     # 调度决策器配置
-    GPU_KV_CACHE_THRESHOLD = CONFIG["decider"]["gpu_kv_cache_threshold"]
-    GPU_THROUGHPUT_LOWER_BOUND = CONFIG["decider"]["gpu_throughput_lower_bound"]
-    GPU_MAX_BATCH_SIZE = CONFIG["decider"]["gpu_max_batch_size"]
     CPU_MAX_BATCH_SIZE = CONFIG["decider"]["cpu_max_batch_size"]
 
-    # 监控配置
-    MONITOR_INTERVAL = CONFIG["monitor"]["interval"]
-
-    DEFAULT_TOKEN_LIMIT = 10
 except KeyError:
     # 部分配置缺失时跳过
     pass
 
-def set_token_limit(limit: int) -> None:
-    global DEFAULT_TOKEN_LIMIT
-    DEFAULT_TOKEN_LIMIT = limit
