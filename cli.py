@@ -22,21 +22,18 @@ import logging
 import shutil
 import sys
 from pathlib import Path
-from typing import Any, Optional
-from urllib.parse import urlparse, urlunparse
+from typing import Any
 
 import yaml
 
 from src.utils.config import (
     CPU_HOST,
     CPU_PORT,
-    DEFAULT_MAX_TOKENS,
-    DEFAULT_MODEL,
-    DEFAULT_TEMPERATURE,
     GPU_HOST,
     GPU_PORT,
     SYSHAX_HOST,
     SYSHAX_PORT,
+    MODEL_NAME,
     load_config,
 )
 
@@ -46,12 +43,8 @@ logger = logging.getLogger(__name__)
 # 确保项目根目录在 sys.path 以导入模块
 sys.path.insert(0, str(Path(__file__).parent))
 
-# 导入主程序和配置模块常量
-main_run = None
-
 # 在文件顶部 imports 之后，添加 BASE_DIR
 BASE_DIR = Path(sys.path[0]).resolve()
-
 
 def get_version() -> str:
     """从 sysHAX.spec 中读取版本号"""
@@ -83,6 +76,8 @@ def cmd_init() -> None:
     example = BASE_DIR / "config" / "config.example.yaml"
     target = BASE_DIR / "config" / "config.yaml"
     try:
+        if target.exists():
+            target.unlink()
         shutil.copy(example, target)
         logger.info("已生成配置文件：%s", target)
     except (OSError, shutil.Error):
@@ -115,24 +110,7 @@ def cmd_interfaces() -> None:
 
 def cmd_model() -> None:
     """返回 model name, max_tokens, temperature"""
-    logger.info("model name: %s", DEFAULT_MODEL)
-    logger.info("max_tokens: %d", DEFAULT_MAX_TOKENS)
-    logger.info("temperature: %s", DEFAULT_TEMPERATURE)
-
-
-def update_url_host_port(url: str, host: Optional[str] = None, port: Optional[int] = None) -> str:
-    """更新 URL 中的 host 或 port，并保留原始占位符"""
-    p = urlparse(url)
-    orig_netloc = p.netloc
-    if ":" in orig_netloc:
-        orig_hostname, orig_port = orig_netloc.split(":", 1)
-    else:
-        orig_hostname, orig_port = orig_netloc, None
-    new_hostname = host or orig_hostname
-    new_port = str(port) if port is not None else orig_port
-    new_netloc = f"{new_hostname}:{new_port}" if new_port else new_hostname
-    return urlunparse(p._replace(netloc=new_netloc))
-
+    logger.info("model name: %s", MODEL_NAME)
 
 # ---------- cmd_config 辅助函数 ----------
 def _load_cfg(path: Path) -> dict[str, Any]:
@@ -150,94 +128,126 @@ def _load_cfg(path: Path) -> dict[str, Any]:
 def _write_cfg(path: Path, cfg: dict[str, Any], key: str, value: str) -> None:
     """写入配置文件"""
     try:
-        path.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        path.write_text(
+            yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
         logger.info("已设置 %s 为 %s", key, value)
     except OSError:
         logger.exception("写入配置失败")
         sys.exit(1)
 
+def _set_gpu_host(cfg: dict[str, Any], value: str) -> None:
+    cfg["services"]["gpu"]["host"] = str(value)
 
-def _update_gpu(cfg: dict[str, Any], sub: str, value: str) -> None:
-    """更新 GPU 配置"""
-    if sub == "host":
-        cfg["services"]["gpu"]["host"] = value
-    elif sub == "port":
+def _set_gpu_port(cfg: dict[str, Any], value: str) -> None:
+    try:
         cfg["services"]["gpu"]["port"] = int(value)
-    else:
-        logger.error("不支持的键: gpu.%s", sub)
+    except ValueError:
+        logger.error("GPU 服务端口必须为整数")
         sys.exit(1)
 
+def _set_cpu_host(cfg: dict[str, Any], value: str) -> None:
+    cfg["services"]["cpu"]["host"] = str(value)
 
-def _update_cpu(cfg: dict[str, Any], sub: str, value: str) -> None:
-    """更新 CPU 配置"""
-    if sub == "host":
-        cfg["services"]["cpu"]["host"] = value
-    elif sub == "port":
+def _set_cpu_port(cfg: dict[str, Any], value: str) -> None:
+    try:
         cfg["services"]["cpu"]["port"] = int(value)
-    else:
-        logger.error("不支持的键: cpu.%s", sub)
+    except ValueError:
+        logger.error("CPU 服务端口必须为整数")
         sys.exit(1)
 
+def _set_conductor_host(cfg: dict[str, Any], value: str) -> None:
+    cfg["services"]["conductor"]["host"] = int(value)
 
-def _update_conductor(cfg: dict[str, Any], sub: str, value: str) -> None:
-    """更新 conductor 配置"""
-    if sub == "host":
-        cfg["services"]["conductor"]["host"] = value
-    elif sub == "port":
+def _set_conductor_port(cfg: dict[str, Any], value: str) -> None:
+    try:
         cfg["services"]["conductor"]["port"] = int(value)
-    else:
-        logger.error("不支持的键: conductor.%s", sub)
+    except ValueError:
+        logger.error("sysHAX 服务端口必须为整数")
         sys.exit(1)
 
+def _set_host(cfg: dict[str, Any], value: str) -> None:
+    _set_gpu_host(cfg, value)
+    _set_cpu_host(cfg, value)
+    _set_conductor_host(cfg, value)
 
-def _update_model(cfg: dict[str, Any], key: str, value: str) -> None:
-    """更新模型配置"""
-    if key == "model":
-        cfg["models"]["default"] = value
-    elif key == "maxtokens":
-        cfg["models"]["params"]["max_tokens"] = int(value)
-    elif key == "temperature":
-        cfg["models"]["params"]["temperature"] = float(value)
-    else:
-        logger.error("不支持的键: %s", key)
+def _set_model_name(cfg: dict[str, Any], value: str) -> None:
+    try:
+        cfg["models"]["default"] = str(value)
+    except ValueError:
+        logger.error("模型名称必须为字符串")
         sys.exit(1)
 
+def _set_cpu_max_batch_size(cfg: dict[str, Any], value: str) -> None:
+    try:
+        cfg["decider"]["cpu_max_batch_size"] = int(value)
+    except ValueError:
+        logger.error("CPU 侧最大并发量必须为整数")
+        sys.exit(1)
+
+def _set_request_timeout(cfg: dict[str, Any], value: str) -> None:
+    try:
+        cfg["system"]["request_timeout"] = int(value)
+    except ValueError:
+        logger.error("请求超时时间必须为整数")
+        sys.exit(1)
+
+HANDLERS = {
+    "host": _set_host,
+    "gpu.host": _set_gpu_host,
+    "gpu.port": _set_gpu_port,
+    "cpu.host": _set_cpu_host,
+    "cpu.port": _set_cpu_port,
+    "conductor.host": _set_conductor_host,
+    "conductor.port": _set_conductor_port,
+    "model_name": _set_model_name,
+    "cpu_max_batch_size": _set_cpu_max_batch_size,
+    "request_timeout": _set_request_timeout,
+}
+
+def _handle(cfg: dict[str, Any], key: str, value: str) -> None:
+    """处理config"""
+    handler = HANDLERS.get(key)
+    if handler:
+        handler(cfg, value)
+    else:
+        logger.warning("不支持的键：%s", key)
 
 def cmd_config(args: argparse.Namespace) -> None:
     """设置配置项"""
     key, value = args.key, args.value
     cfg_path = BASE_DIR / "config" / "config.yaml"
-    # 如果 config.yaml 不存在，先自动初始化
     if not cfg_path.exists():
         logger.info("配置文件不存在，自动初始化配置文件")
         cmd_init()
     cfg = _load_cfg(cfg_path)
-    # 一次更新所有服务的 host
-    if key == "host":
-        _update_gpu(cfg, "host", value)
-        _update_cpu(cfg, "host", value)
-        _update_conductor(cfg, "host", value)
-    elif "." in key:
-        service, sub = key.split(".", 1)
-        if service == "gpu":
-            _update_gpu(cfg, sub, value)
-        elif service == "cpu":
-            _update_cpu(cfg, sub, value)
-        elif service == "conductor":
-            _update_conductor(cfg, sub, value)
-        else:
-            logger.error("不支持的键: %s", key)
-            sys.exit(1)
-    else:
-        _update_model(cfg, key, value)
+
+    _handle(cfg, key, value)
     _write_cfg(cfg_path, cfg, key, value)
 
 
 def main() -> None:
-    """SysHAX 命令行工具"""
-    parser = argparse.ArgumentParser(prog="syshax")
-    parser.add_argument("--version", action="store_true", help="返回版本号")
-    subparsers = parser.add_subparsers(dest="command")
+    """使用 sysHAX 命令行工具"""
+    parser = argparse.ArgumentParser(
+        prog="syshax",
+        usage="syshax [OPTIONS] COMMAND [ARGS]...",
+        description="欢迎使用 sysHAX 命令行工具",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog=(
+            "可用命令:\n"
+            "  run               启动 sysHAX 服务\n"
+            "  init              生成 config/config.yaml（从示例文件复制）\n"
+            "  check-config      检查 config.yaml 是否存在且合法\n"
+            "  interfaces        打印 GPU/CPU/Conductor 三个服务的 URL\n"
+            "  model             打印当前模型名称、max_tokens、temperature\n"
+            '  config            设置配置项；使用 "syshax config --help" 查看详细'
+        ),
+        add_help=False,
+    )
+    parser.add_argument("-h", "--help", action="help", help="显示帮助信息并退出")
+    parser.add_argument("--version", action="store_true", help="打印当前版本号并退出")
+    subparsers = parser.add_subparsers(dest="command", metavar="COMMAND", help=argparse.SUPPRESS)
 
     subparsers.add_parser("run", help="启动服务")
     subparsers.add_parser("init", help="生成 config/config.yaml")
@@ -245,8 +255,26 @@ def main() -> None:
     subparsers.add_parser("interfaces", help="返回 gpu, cpu, conductor 三个 URL")
     subparsers.add_parser("model", help="返回 model name, max_tokens, temperature")
 
-    parser_config = subparsers.add_parser("config", help="设置配置项")
-    parser_config.add_argument("key", help="配置键，例如 gpu.host")
+    parser_config = subparsers.add_parser(
+        "config",
+        help='设置配置项；使用 "syshax config --help" 查看详细',
+        description="设置或修改 config/config.yaml 中的某个配置项",
+        usage="syshax config <key> <value>",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="""可用 <key> 列表:
+            host                                 同时更新所有服务（gpu/cpu/conductor）的 host
+            gpu.host                             GPU 服务 host
+            gpu.port                             GPU 服务 port
+            cpu.host                             CPU 服务 host
+            cpu.port                             CPU 服务 port
+            conductor.host                       sysHAX 服务 host
+            conductor.port                       sysHAX 服务 port
+            model_name                           模型名称
+            cpu_max_batch_size                   CPU 侧最大并发量
+            request_timeout                      请求超时时间（秒）
+            """,
+    )
+    parser_config.add_argument("key", help="配置键，例如 gpu.port 或 model_name")
     parser_config.add_argument("value", help="配置值")
 
     args = parser.parse_args()
@@ -266,7 +294,6 @@ def main() -> None:
         cmd_config(args)
     else:
         parser.print_help()
-
 
 if __name__ == "__main__":
     main()

@@ -65,40 +65,16 @@ try:
     SYSHAX_HOST = CONFIG["services"]["conductor"]["host"]
     SYSHAX_PORT = CONFIG["services"]["conductor"]["port"]
 
-    # 请求队列配置
-    MAX_QUEUE_SIZE = CONFIG["system"]["max_queue_size"]
+    # 请求超时时间
     REQUEST_TIMEOUT = CONFIG["system"]["request_timeout"]
 
     # 模型配置
-    DEFAULT_MODEL = CONFIG["models"]["default"]
-    DEFAULT_MAX_TOKENS = CONFIG["models"]["params"]["max_tokens"]
-    DEFAULT_TEMPERATURE = CONFIG["models"]["params"]["temperature"]
-    DEFAULT_TEST_PROMPT = CONFIG["models"]["params"]["test_prompt"]
-    DEFAULT_TEST_TOKENS = CONFIG["models"]["params"]["test_tokens"]
+    MODEL_NAME = CONFIG["models"]["model_name"]
 
     # 调度决策器配置
-    MAX_NUM_SEQS = CONFIG["decider"]["max_num_seqs"]
-    GPU_CACHE_THRESHOLD = CONFIG["decider"]["gpu_cache_threshold"]
-    CPU_THROUGHPUT_THRESHOLD = CONFIG["decider"]["cpu_throughput_threshold"]
-    TOKEN_LIMIT_MULTIPLIER = CONFIG["decider"]["token_limit_multiplier"]
-    TOKEN_LIMIT_MIN = CONFIG["decider"]["token_limit_min"]
-    TOKEN_LIMIT_MAX = CONFIG["decider"]["token_limit_max"]
+    CPU_MAX_BATCH_SIZE = CONFIG["decider"]["cpu_max_batch_size"]
 
-    # 监控配置
-    MONITOR_INTERVAL = CONFIG["monitor"]["interval"]
 except KeyError:
     # 部分配置缺失时跳过
     pass
 
-
-@dataclass
-class ServicePerformance:
-    """
-    服务性能指标数据类
-
-    用于存储GPU或CPU服务的性能指标，包括延迟和吞吐量。
-    ServicePerformance本身不区分GPU或CPU，区分是在使用时通过创建不同实例实现的。
-    """
-
-    avg_latency: float  # 平均延迟，单位毫秒
-    throughput: float  # 吞吐量，单位tokens/s
