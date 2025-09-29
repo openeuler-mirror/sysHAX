@@ -76,6 +76,8 @@ def cmd_init() -> None:
     example = BASE_DIR / "config" / "config.example.yaml"
     target = BASE_DIR / "config" / "config.yaml"
     try:
+        if target.exists():
+            target.unlink()
         shutil.copy(example, target)
         logger.info("已生成配置文件：%s", target)
     except (OSError, shutil.Error):
