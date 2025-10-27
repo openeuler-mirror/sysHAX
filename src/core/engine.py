@@ -42,6 +42,7 @@ class Engine:
 
     async def stop(self):
         self._running = False
+        await self.scheduler.cancel_all_tasks()
         if self._task and not self._task.done():
             self._task.cancel()
             try:

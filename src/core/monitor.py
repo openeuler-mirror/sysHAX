@@ -17,9 +17,9 @@ import re
 from re import Pattern
 import httpx
 
-from src.utils.config import CPU_HOST, CPU_PORT, GPU_HOST, GPU_PORT
 from src.utils.logger import Logger
 from src.core.metrics import MetricsService
+from src.utils.config import SyshaxConfig
 
 # Prometheus指标正则匹配模式
 # 资源使用指标
@@ -100,11 +100,12 @@ class SystemMonitor:
     系统监控类，同时监控GPU和CPU服务
     """
 
-    def __init__(self, metrics_service: MetricsService) -> None:
+    def __init__(self, metrics_service: MetricsService, syshax_config: SyshaxConfig) -> None:
         """初始化系统监控器：根据配置拼接 metrics URL"""
+        self.config = syshax_config
         # 构建 GPU/CPU metrics URL
-        self.gpu_monitor = ResourceMonitor(f"http://{GPU_HOST}:{GPU_PORT}/metrics")
-        self.cpu_monitor = ResourceMonitor(f"http://{CPU_HOST}:{CPU_PORT}/metrics")
+        self.gpu_monitor = ResourceMonitor(f"http://{syshax_config.gpu_host}:{syshax_config.gpu_port}/metrics")
+        self.cpu_monitor = ResourceMonitor(f"http://{syshax_config.cpu_host}:{syshax_config.cpu_port}/metrics")
         self.metrics_service = metrics_service
 
     def get_gpu_monitor(self) -> None:

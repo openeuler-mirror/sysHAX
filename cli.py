@@ -26,17 +26,7 @@ from typing import Any
 
 import yaml
 
-from src.utils.config import (
-    CPU_HOST,
-    CPU_PORT,
-    GPU_HOST,
-    GPU_PORT,
-    SYSHAX_HOST,
-    SYSHAX_PORT,
-    MODEL_NAME,
-    load_config,
-)
-
+from src.utils.config import load_syshax_config
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
 
@@ -88,7 +78,7 @@ def cmd_init() -> None:
 def cmd_check_config() -> None:
     """检查 config.yaml 是否存在及合法"""
     try:
-        _ = load_config()
+        _ = load_syshax_config()
         logger.info("配置文件合法")
     except FileNotFoundError:
         logger.exception("配置文件不存在")
@@ -99,18 +89,6 @@ def cmd_check_config() -> None:
     except Exception:
         logger.exception("配置文件不合法")
         sys.exit(1)
-
-
-def cmd_interfaces() -> None:
-    """返回 gpu, cpu, conductor 三个 URL"""
-    logger.info("gpu: http://%s:%s", GPU_HOST, GPU_PORT)
-    logger.info("cpu: http://%s:%s", CPU_HOST, CPU_PORT)
-    logger.info("conductor: http://%s:%s", SYSHAX_HOST, SYSHAX_PORT)
-
-
-def cmd_model() -> None:
-    """返回 model name, max_tokens, temperature"""
-    logger.info("model name: %s", MODEL_NAME)
 
 # ---------- cmd_config 辅助函数 ----------
 def _load_cfg(path: Path) -> dict[str, Any]:
@@ -172,11 +150,12 @@ def _set_host(cfg: dict[str, Any], value: str) -> None:
     _set_cpu_host(cfg, value)
     _set_conductor_host(cfg, value)
 
-def _set_model_name(cfg: dict[str, Any], value: str) -> None:
-    try:
-        cfg["models"]["default"] = str(value)
-    except ValueError:
-        logger.error("模型名称必须为字符串")
+def _set_auto_pd_offload(cfg: dict[str, Any], value: str) -> None:
+    val_lower = value.lower()
+    if val_lower in ("true", "false"):
+        cfg["decider"]["auto_pd_offload"] = val_lower == "true"
+    else:
+        logger.error("auto_pd_offload 必须为 true 或 false")
         sys.exit(1)
 
 def _set_cpu_max_batch_size(cfg: dict[str, Any], value: str) -> None:
@@ -201,8 +180,8 @@ HANDLERS = {
     "cpu.port": _set_cpu_port,
     "conductor.host": _set_conductor_host,
     "conductor.port": _set_conductor_port,
-    "model_name": _set_model_name,
     "cpu_max_batch_size": _set_cpu_max_batch_size,
+    "auto_pd_offload": _set_auto_pd_offload,
     "request_timeout": _set_request_timeout,
 }
 
@@ -239,8 +218,6 @@ def main() -> None:
             "  run               启动 sysHAX 服务\n"
             "  init              生成 config/config.yaml（从示例文件复制）\n"
             "  check-config      检查 config.yaml 是否存在且合法\n"
-            "  interfaces        打印 GPU/CPU/Conductor 三个服务的 URL\n"
-            "  model             打印当前模型名称、max_tokens、temperature\n"
             '  config            设置配置项；使用 "syshax config --help" 查看详细'
         ),
         add_help=False,
@@ -252,8 +229,6 @@ def main() -> None:
     subparsers.add_parser("run", help="启动服务")
     subparsers.add_parser("init", help="生成 config/config.yaml")
     subparsers.add_parser("check-config", help="检查 config.yaml 是否存在及合法")
-    subparsers.add_parser("interfaces", help="返回 gpu, cpu, conductor 三个 URL")
-    subparsers.add_parser("model", help="返回 model name, max_tokens, temperature")
 
     parser_config = subparsers.add_parser(
         "config",
@@ -269,12 +244,12 @@ def main() -> None:
             cpu.port                             CPU 服务 port
             conductor.host                       sysHAX 服务 host
             conductor.port                       sysHAX 服务 port
-            model_name                           模型名称
+            auto_pd_offload                      是否开启自动 PD offload（true/false）
             cpu_max_batch_size                   CPU 侧最大并发量
             request_timeout                      请求超时时间（秒）
             """,
     )
-    parser_config.add_argument("key", help="配置键，例如 gpu.port 或 model_name")
+    parser_config.add_argument("key", help="配置键，例如 gpu.port")
     parser_config.add_argument("value", help="配置值")
 
     args = parser.parse_args()
@@ -286,10 +261,6 @@ def main() -> None:
         cmd_init()
     elif args.command == "check-config":
         cmd_check_config()
-    elif args.command == "interfaces":
-        cmd_interfaces()
-    elif args.command == "model":
-        cmd_model()
     elif args.command == "config":
         cmd_config(args)
     else:

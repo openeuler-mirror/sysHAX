@@ -19,9 +19,7 @@ from typing import Any
 from src.core.monitor import SystemMonitor
 from src.core.runner import Runner
 from src.core.metrics import MetricsService
-from src.utils.config import (
-    CPU_MAX_BATCH_SIZE
-)
+from src.utils.config import SyshaxConfig
 from src.utils.logger import Logger
 
 class Scheduler:
@@ -36,19 +34,23 @@ class Scheduler:
     def __init__(self,
                  system_monitor: SystemMonitor,
                  runner: Runner,
-                 metrics_service: MetricsService) -> None:
+                 metrics_service: MetricsService,
+                 syshax_config: SyshaxConfig) -> None:
         """
         初始化调度决策器
         """
         self.system_monitor: SystemMonitor = system_monitor
         self.runner: Runner = runner
         self.metrics_service: MetricsService = metrics_service
+        self.syshax_config: SyshaxConfig = syshax_config
     
         self.cpu_max_batch = 256
         self.gpu_max_batch = 256
         self.waiting : asyncio.Queue = asyncio.Queue()
         self.cpu_running_num: int = 0
         self.gpu_running_num: int = 0
+
+        self._running_tasks: set[asyncio.Task] = set()
 
     async def submit_task(self, data: dict[str, Any]) -> None:
         output_queue = asyncio.Queue()
@@ -82,14 +84,28 @@ class Scheduler:
             if "num_decode_tokens" in task_data["input"]:
                 decision["device"] = "CPU"
                 Logger.debug("任务包含num_decode_tokens，强制调度到CPU")
-
+            else:
+                if self.syshax_config.auto_pd_offload and decision["device"] == "CPU":
+                    # 不含有num_decode_tokens字段，说明是完整任务，首先会进行prefill任务
+                    # CPU侧不适合执行prefill任务，当开启auto_pd_offload会自动进行PD解耦
+                    task_data["input"]["num_decode_tokens"] = 1
+                    decision["device"] = "GPU"
             if decision["device"] == "GPU" and self.gpu_running_num < self.gpu_max_batch:
                 scheduled["GPU"] += 1
-                asyncio.create_task(self._execute_task(decision["device"], task_data))
+                self.gpu_running_num += 1
+                self.metrics_service.set_gpu_running_num(self.gpu_running_num)
+                task = asyncio.create_task(self._execute_task(decision["device"], task_data))
+                self._running_tasks.add(task)
+                task.add_done_callback(self._running_tasks.discard)
                 Logger.debug(f"任务分配到GPU执行")
-            elif decision["device"] == "CPU" and self.cpu_running_num < self.cpu_max_batch:
+            elif decision["device"] == "CPU" and self.cpu_running_num < self.cpu_max_batch:              
+                Logger.debug("自动开启CPU侧prefill任务的num_decode_tokens=1以启用部分解码卸载")
                 scheduled["CPU"] += 1
-                asyncio.create_task(self._execute_task(decision["device"], task_data))
+                self.cpu_running_num += 1
+                self.metrics_service.set_cpu_running_num(self.cpu_running_num)
+                task = asyncio.create_task(self._execute_task(decision["device"], task_data))
+                self._running_tasks.add(task)
+                task.add_done_callback(self._running_tasks.discard)
                 Logger.debug(f"任务分配到CPU执行")
             else:
                 self.waiting.put_nowait(task_data)
@@ -103,16 +119,24 @@ class Scheduler:
     async def _execute_task(self, device: str, task_data: dict[str, Any]) -> None:
         request = task_data["input"]
         output_queue = task_data["output_queue"]
-
-        if device == "GPU":
-            self.gpu_running_num += 1
-            self.metrics_service.set_gpu_running_num(self.gpu_running_num)
-        elif device == "CPU":
-            self.cpu_running_num += 1
-            self.metrics_service.set_cpu_running_num(self.cpu_running_num)
+        
+        # 用于传出接续任务
+        resubmit_task_data = {"data": None}
         try:
-            async for chunk in self.runner.task_handler(device=device, data=request):
+            async for chunk in self.runner.task_handler(device=device, data=request, resubmit_task_data=resubmit_task_data):
                 await output_queue.put(chunk)
+
+            if resubmit_task_data["data"] is not None:
+                resubmit_task = {
+                    "input": resubmit_task_data["data"],
+                    "output_queue": output_queue,
+                    "create_time": time.time()
+                }
+                await self.waiting.put(resubmit_task)
+                Logger.debug(f"接续任务已加入调度队列: {resubmit_task_data['data'].get('request_id_inference')}")
+            else:
+                await output_queue.put(b"[DONE]")
+
         except Exception as e:
             Logger.error(f"{device}任务执行失败: {e}", exc_info=True)
             await output_queue.put(b"[DONE]")
@@ -142,6 +166,7 @@ class Scheduler:
         except Exception as e:
             Logger.error(f"更新系统指标失败: {e}", exc_info=True)
 
+        CPU_MAX_BATCH_SIZE = self.syshax_config.cpu_max_batch_size
         # 是否将任务转移到CPU
         log_msg = ""
         use_cpu = False
@@ -152,8 +177,8 @@ class Scheduler:
             log_msg = "gpu_num_running为0，优先向GPU发任务"
         elif self.metrics_service.cpu_num_running == 0:
             use_cpu = True
-            log_msg = f"gpu_num_running为{self.metrics_service.gpu_num_running}，gpu_num_running为0，优先向CPU发任务"
-        elif gpu_decode_throughout_per_batch > cpu_decode_throughout_per_batch:
+            log_msg = f"gpu_num_running为{self.metrics_service.gpu_num_running}，cpu_num_running为0，优先向CPU发任务"
+        elif gpu_decode_throughout_per_batch >= cpu_decode_throughout_per_batch:
             use_cpu = False
             log_msg = f"GPU平均吞吐量{gpu_decode_throughout_per_batch:.2f}tokens/s，高于CPU平均吞吐量{cpu_decode_throughout_per_batch:.2f}tokens/s，优先向GPU发任务"
         elif self.metrics_service.cpu_num_running > CPU_MAX_BATCH_SIZE:
@@ -168,3 +193,19 @@ class Scheduler:
         Logger.debug(f"\033[1;32m调度决策: {decision}\033[0m")
         return decision
 
+    async def cancel_all_tasks(self):
+        """取消所有正在运行的任务"""
+        if not self._running_tasks:
+            return
+        Logger.info(f"正在取消 {len(self._running_tasks)} 个运行中的任务...")
+        for task in self._running_tasks:
+            if not task.done():
+                task.cancel()
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*self._running_tasks, return_exceptions=True),
+                timeout=2.0
+            )
+        except asyncio.TimeoutError:
+            Logger.warning("部分任务未能在 2 秒内取消")
+        self._running_tasks.clear()

@@ -20,26 +20,19 @@ from collections import deque
 import asyncio
 
 from src.core.metrics import MetricsService
-from src.utils.config import (
-    CPU_HOST,
-    CPU_PORT,
-    GPU_HOST,
-    GPU_PORT,
-    SYSHAX_HOST,
-    SYSHAX_PORT,
-    REQUEST_TIMEOUT
-)
+from src.utils.config import SyshaxConfig
 from src.utils.logger import Logger
 
 class Runner:
-    def __init__(self, metrics_service: MetricsService) -> None:
+    def __init__(self, metrics_service: MetricsService, syshax_config: SyshaxConfig) -> None:
         self.metrics_service: MetricsService = metrics_service
+        self.syshax_config: SyshaxConfig = syshax_config
         # 拼接 /v1/chat/completions 服务地址
-        self.v1_chat_gpu = f"http://{GPU_HOST}:{GPU_PORT}/v1/chat/completions"
-        self.v1_chat_cpu = f"http://{CPU_HOST}:{CPU_PORT}/v1/chat/completions"
-        self.v1_chat = f"http://{SYSHAX_HOST}:{SYSHAX_PORT}/v1/chat/completions"
+        self.v1_chat_gpu = f"http://{syshax_config.gpu_host}:{syshax_config.gpu_port}/v1/chat/completions"
+        self.v1_chat_cpu = f"http://{syshax_config.cpu_host}:{syshax_config.cpu_port}/v1/chat/completions"
+        self.v1_chat = f"http://{syshax_config.syshax_host}:{syshax_config.syshax_port}/v1/chat/completions"
 
-    async def task_handler(self, device: str, data: dict[str, any]):
+    async def task_handler(self, device: str, data: dict[str, any], resubmit_task_data: dict):
         is_stream = data.get("stream", False)
         recent_chunks = deque(maxlen=3)
         try:
@@ -63,8 +56,8 @@ class Runner:
             Logger.debug(f"任务{id}未找到包含 finish_reason 的事件")
         elif finish_reason == "scheduled":
             Logger.info(f"任务{id} finish_reason 为 {finish_reason}, 被接续推理")
-            max_tokens = data.get("max_tokens", 512)
-            asyncio.create_task(self._resubmit_to_self(data, id, max_tokens))
+            if resubmit_task_data is not None:
+                resubmit_task_data["data"] = await self._create_resubmit_task(data, id)
 
     async def default_request_stream(
         self,
@@ -80,7 +73,7 @@ class Runner:
                         service_url,
                         headers={"Content-Type": "application/json"},
                         json=data,
-                        timeout=REQUEST_TIMEOUT,
+                        timeout=self.syshax_config.request_timeout,
                     ) as response:
 
                         if response.status_code != 200:
@@ -104,7 +97,7 @@ class Runner:
                     service_url,
                     headers={"Content-Type": "application/json"},
                     json=data,
-                    timeout=REQUEST_TIMEOUT,
+                    timeout=self.syshax_config.request_timeout,
                 )
                 response.raise_for_status()
                 return response.json()
@@ -165,25 +158,16 @@ class Runner:
                 continue
         return id, finish_reason
 
-    async def _resubmit_to_self(self, data: dict[str, any], request_id_inference: str, num_decode_tokens: int) -> None:
+    async def _create_resubmit_task(self,
+                                data: dict[str, any],
+                                request_id_inference: str) -> None:
         """
         将任务重新提交给自己执行，适用于 finish_reason == 'scheduled' 的情况
         """
         new_data = data.copy()
         new_data["request_id_inference"] = request_id_inference
-        new_data["num_decode_tokens"] = num_decode_tokens
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.post(
-                    self.v1_chat,
-                    json=new_data,
-                    headers={"Content-Type": "application/json"},
-                    timeout=REQUEST_TIMEOUT,
-                )
-                if response.status_code == 200:
-                    Logger.debug(f"{request_id_inference}接续提交成功")
-                else:
-                    Logger.error(f"{request_id_inference}接续提交失败: {response.status_code}, {response.text}")
-            except Exception as e:
-                Logger.error(f"{request_id_inference}接续提交异常: {e}", exc_info=True)
+        new_data["max_tokens"] = data.get("max_tokens")
+        new_data["num_decode_tokens"] = new_data["max_tokens"]
+        
+        return new_data
 
