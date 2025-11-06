@@ -149,6 +149,8 @@ class Runner:
             try:
                 if 'finish_reason' in chunk_dict['choices'][0]:
                     finish_reason = chunk_dict.get("choices", [{}])[0].get("finish_reason", None)
+                if 'finish_reason' != 'scheduled' and 'stop_reason' in chunk_dict['choices'][0]:
+                    finish_reason = chunk_dict.get("choices", [{}])[0].get("stop_reason", None)
                 if 'id' in chunk_dict:
                     id = chunk_dict.get("id", None)
                 if id is not None and finish_reason is not None:
