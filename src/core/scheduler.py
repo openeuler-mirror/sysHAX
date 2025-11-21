@@ -18,7 +18,7 @@ import asyncio
 from typing import Any
 from src.core.monitor import SystemMonitor
 from src.core.runner import Runner
-from src.core.metrics import MetricsService
+from src.core.metrics import MetricsService, SSE_DONE_EVENT
 from src.utils.config import SyshaxConfig
 from src.utils.logger import Logger
 
@@ -43,7 +43,7 @@ class Scheduler:
         self.runner: Runner = runner
         self.metrics_service: MetricsService = metrics_service
         self.syshax_config: SyshaxConfig = syshax_config
-    
+
         self.cpu_max_batch = 256
         self.gpu_max_batch = 256
         self.waiting : asyncio.Queue = asyncio.Queue()
@@ -64,7 +64,7 @@ class Scheduler:
 
     def has_unfinshed_tasks(self) -> bool:
         return self.waiting.qsize() > 0
-    
+
     def has_running_tasks(self) -> bool:
         return self.cpu_running_num > 0 or self.gpu_running_num > 0
 
@@ -119,7 +119,8 @@ class Scheduler:
     async def _execute_task(self, device: str, task_data: dict[str, Any]) -> None:
         request = task_data["input"]
         output_queue = task_data["output_queue"]
-        
+        is_stream = request.get("stream", False)
+
         # 用于传出接续任务
         resubmit_task_data = {"data": None}
         try:
@@ -135,11 +136,19 @@ class Scheduler:
                 await self.waiting.put(resubmit_task)
                 Logger.debug(f"接续任务已加入调度队列: {resubmit_task_data['data'].get('request_id_inference')}")
             else:
-                await output_queue.put(b"[DONE]")
+                if is_stream:
+                    await output_queue.put(None)
+                else:
+                    await output_queue.put(b"[DONE]")
 
         except Exception as e:
             Logger.error(f"{device}任务执行失败: {e}", exc_info=True)
-            await output_queue.put(b"[DONE]")
+            if is_stream:
+                await output_queue.put(b'data: {"error": "internal_error"}\n\n')
+                await output_queue.put(SSE_DONE_EVENT)
+                await output_queue.put(None)
+            else:
+                await output_queue.put(b"[DONE]")
         finally:
             if device == "GPU":
                 self.gpu_running_num -= 1
