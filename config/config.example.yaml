@@ -25,4 +25,4 @@ decider:
   auto_pd_offload: false
 
   # CPU 最大并发量
-  cpu_max_batch_size: 256
+  cpu_max_batch_size: 20

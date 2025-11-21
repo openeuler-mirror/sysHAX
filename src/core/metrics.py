@@ -25,8 +25,8 @@ SSE_DONE_EVENT = b"data: [DONE]\n\n"
 
 @dataclass
 class MetricsData:
-    gpu_num_running: int = 0        # 正在运行的任务数
-    cpu_num_running: int = 0        # 正在运行的任务数
+    gpu_running_num: int = 0        # 正在运行的任务数
+    cpu_running_num: int = 0        # 正在运行的任务数
     num_waiting: int = 0            # 等待中的任务数
     gpu_decode_throughout: float = 0.0      # 解码吞吐量，tokens/s
     cpu_decode_throughout: float = 0.0      # 解码吞吐量，tokens/s
@@ -72,8 +72,8 @@ class MetricsService:
                 if print_counter >= steps_per_print:
 
                     Logger.info(
-                        f"gpu Running: {self.metrics_data.gpu_num_running} reqs, "
-                        f"cpu Running: {self.metrics_data.cpu_num_running} reqs, "
+                        f"gpu Running: {self.metrics_data.gpu_running_num} reqs, "
+                        f"cpu Running: {self.metrics_data.cpu_running_num} reqs, "
                         f"Pending: {self.metrics_data.num_waiting} reqs, "
                         f"Avg gpu generation throughput: {self.metrics_data.gpu_decode_throughout:.1f} tokens/s, "
                         f"Avg cpu generation throughput: {self.metrics_data.cpu_decode_throughout:.1f} tokens/s, "
@@ -162,10 +162,10 @@ class MetricsService:
         return result
 
     def set_cpu_running_num(self, num: int) -> None:
-        self.metrics_data.cpu_num_running = num
+        self.metrics_data.cpu_running_num = num
 
     def set_gpu_running_num(self, num: int) -> None:
-        self.metrics_data.gpu_num_running = num
+        self.metrics_data.gpu_running_num = num
 
     def set_waiting_num(self, num: int) -> None:
         self.metrics_data.num_waiting = num
@@ -177,12 +177,12 @@ class MetricsService:
         self.metrics_data.cpu_cache_usage = usage
 
     @property
-    def gpu_num_running(self) -> int:
-        return self.metrics_data.gpu_num_running
+    def gpu_running_num(self) -> int:
+        return self.metrics_data.gpu_running_num
 
     @property
-    def cpu_num_running(self) -> int:
-        return self.metrics_data.cpu_num_running
+    def cpu_running_num(self) -> int:
+        return self.metrics_data.cpu_running_num
 
     @property
     def num_waiting(self) -> int:
