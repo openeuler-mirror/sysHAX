@@ -22,6 +22,30 @@ from src.core.metrics import MetricsService, SSE_DONE_EVENT
 from src.utils.config import SyshaxConfig
 from src.utils.logger import Logger
 
+SCHEDULE_DICT: dict[int, Any] = {
+    100: "gpu_running_num为0，优先向GPU发任务",
+    101: "CPU分配的运行中请求数{cpu_allocated}，超过最大并发量{cpu_max}，优先向GPU发任务",
+    102: {
+        "message": "{reason_detail}",
+        "reasons": {
+            "GPU_LOW_THROUGHPUT": "GPU、CPU暂时无法检测到吞吐量，动态向二者发送请求，本次向GPU发送请求",
+            "GPU_HIGHER_TP": "GPU平均吞吐量{gpu_tp:.2f}tokens/s，高于CPU平均吞吐量{cpu_tp:.2f}tokens/s，优先向GPU发任务",
+        },
+    },
+    200: "gpu_running_num为{gpu_running_num}，cpu_running_num为0，优先向CPU发任务",
+    201: {
+        "message": "{reason_detail}",
+        "reasons": {
+            "CPU_LOW_THROUGHPUT": "GPU、CPU暂时无法检测到吞吐量，动态向二者发送请求，本次向CPU发送请求",
+        },
+    },
+    202: "CPU平均吞吐量{cpu_tp:.2f}tokens/s，高于GPU平均吞吐量{gpu_tp:.2f}tokens/s，优先向CPU发任务",
+}
+
+REASON_GPU_LOW_THROUGHPUT = "GPU_LOW_THROUGHPUT"
+REASON_CPU_LOW_THROUGHPUT = "CPU_LOW_THROUGHPUT"
+REASON_GPU_HIGHER_TP = "GPU_HIGHER_TP"
+
 class Scheduler:
     """
     调度决策类，根据系统指标决定在何处执行解码任务
@@ -161,8 +185,40 @@ class Scheduler:
                 self.cpu_running_num -= 1
                 self.metrics_service.set_cpu_running_num(self.cpu_running_num)
 
-    def _make_decision(self) -> dict:
+    def _format_schedule_message(self, code: int, **context: Any) -> str:
+        """根据调度码渲染日志消息"""
+        entry = SCHEDULE_DICT.get(code)
+        if entry is None:
+            template = "调度码{code}未定义"
+        elif isinstance(entry, dict):
+            template = entry.get("message", "调度码{code}未定义")
+        else:
+            template = entry
+        try:
+            return template.format(**context, code=code)
+        except KeyError as exc:
+            missing_key = exc.args[0]
+            Logger.warning(f"调度消息缺少参数: {missing_key}, code={code}, context={context}")
+            return template
 
+    def _get_reason_detail(self, code: int, reason_key: str, **context: Any) -> str:
+        """从调度字典中获取reason_detail模板"""
+        entry = SCHEDULE_DICT.get(code)
+        if isinstance(entry, dict):
+            template = entry.get("reasons", {}).get(reason_key)
+            if template:
+                try:
+                    return template.format(**context)
+                except KeyError as exc:
+                    missing_key = exc.args[0]
+                    Logger.warning(
+                        f"reason_detail缺少参数: {missing_key}, code={code}, reason_key={reason_key}, context={context}"
+                    )
+                    return template
+        Logger.warning(f"未找到reason_detail: code={code}, reason_key={reason_key}")
+        return ""
+
+    def _make_decision(self) -> dict:
         """
         做出调度决策，返回设备类型和token限制
 
@@ -181,7 +237,8 @@ class Scheduler:
 
         CPU_MAX_BATCH_SIZE = self.syshax_config.cpu_max_batch_size
         # 是否将任务转移到CPU
-        log_msg = ""
+        msg_code = None
+        context: dict[str, Any] = {}
         use_cpu = False
         gpu_decode_throughout_per_batch = (
             self.metrics_service.gpu_decode_throughout / self.metrics_service.gpu_running_num
@@ -191,35 +248,56 @@ class Scheduler:
             if self.metrics_service.cpu_running_num > 0 else 0)
         if self.gpu_running_num == 0:
             use_cpu = False
-            log_msg = "gpu_running_num为0，优先向GPU发任务"
+            msg_code = 100
         elif self.cpu_running_num + self.gpu_scheduled_running_num == 0:
             use_cpu = True
-            log_msg = f"gpu_running_num为{self.gpu_running_num}，cpu_running_num为0，优先向CPU发任务"
+            msg_code = 200
+            context = {"gpu_running_num": self.gpu_running_num}
         elif self.cpu_running_num + self.gpu_scheduled_running_num >= CPU_MAX_BATCH_SIZE:
             use_cpu = False
-            log_msg = (f"CPU分配的运行中请求数{self.cpu_running_num + self.gpu_scheduled_running_num}，"
-                       f"超过最大并发量{CPU_MAX_BATCH_SIZE}，优先向GPU发任务")
+            msg_code = 101
+            context = {
+                "cpu_allocated": self.cpu_running_num + self.gpu_scheduled_running_num,
+                "cpu_max": CPU_MAX_BATCH_SIZE
+            }
 
-        if log_msg == "":
+        if msg_code is None:
             if gpu_decode_throughout_per_batch < 0.1 and cpu_decode_throughout_per_batch < 0.1:
                 if (self.gpu_running_num - self.gpu_scheduled_running_num <
                     self.cpu_running_num + self.gpu_scheduled_running_num):
                     use_cpu = False
-                    log_msg = "GPU、CPU暂时无法检测到吞吐量，动态向二者发送请求，本此向GPU发送请求"
+                    msg_code = 102
+                    context = {
+                        "reason_detail": self._get_reason_detail(102, REASON_GPU_LOW_THROUGHPUT)
+                    }
                 else:
                     use_cpu = True
-                    log_msg = "GPU、CPU暂时无法检测到吞吐量，动态向二者发送请求，本此向CPU发送请求"
+                    msg_code = 201
+                    context = {
+                        "reason_detail": self._get_reason_detail(201, REASON_CPU_LOW_THROUGHPUT)
+                    }
             elif gpu_decode_throughout_per_batch >= cpu_decode_throughout_per_batch:
                 use_cpu = False
-                log_msg = (f"GPU平均吞吐量{gpu_decode_throughout_per_batch:.2f}tokens/s，"
-                          f"高于CPU平均吞吐量{cpu_decode_throughout_per_batch:.2f}tokens/s，优先向GPU发任务")
+                msg_code = 102
+                context = {
+                    "reason_detail": self._get_reason_detail(
+                        102,
+                        REASON_GPU_HIGHER_TP,
+                        gpu_tp=gpu_decode_throughout_per_batch,
+                        cpu_tp=cpu_decode_throughout_per_batch
+                    )
+                }
             else:
                 use_cpu = True
-                log_msg = (f"CPU平均吞吐量{cpu_decode_throughout_per_batch:.2f}tokens/s，"
-                          f"高于GPU平均吞吐量{gpu_decode_throughout_per_batch:.2f}tokens/s，优先向CPU发任务")
+                msg_code = 202
+                context = {
+                    "gpu_tp": gpu_decode_throughout_per_batch,
+                    "cpu_tp": cpu_decode_throughout_per_batch
+                }
 
         decision = {"device": "CPU" if use_cpu else "GPU", "token_limit": 0}
-        Logger.debug(f"\033[1;32m{log_msg}, 调度决策: {decision}\033[0m")
+        log_msg = self._format_schedule_message(msg_code or -1, **context)
+        Logger.debug(f"\033[1;32m{log_msg} (code={msg_code}), 调度决策: {decision}\033[0m")
         return decision
 
     async def cancel_all_tasks(self):
