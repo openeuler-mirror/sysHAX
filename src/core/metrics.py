@@ -21,6 +21,8 @@ from typing import AsyncGenerator, Coroutine
 
 from src.utils.logger import Logger
 
+SSE_DONE_EVENT = b"data: [DONE]\n\n"
+
 @dataclass
 class MetricsData:
     gpu_num_running: int = 0        # 正在运行的任务数
@@ -105,10 +107,14 @@ class MetricsService:
         start_time = time.time_ns()
         first_token_time = None
         tokens = 0
+        done_chunk = None
         async for chunk in generator:
-            chunk_str = chunk.decode('utf-8').removeprefix("data: ").strip()
+            try:
+                chunk_str = chunk.decode('utf-8').removeprefix("data: ").strip()
+            except UnicodeDecodeError:
+                chunk_str = ""
             if chunk_str == "[DONE]":
-                yield chunk
+                done_chunk = chunk if chunk.startswith(b"data:") else SSE_DONE_EVENT
                 continue
             if device == "GPU":
                 self._gpu_token_num += 1
@@ -140,6 +146,7 @@ class MetricsService:
         # SSE 格式返回 metrics 事件
         metrics_event = f"data: {json.dumps({'metrics': metrics})}\n\n"
         yield metrics_event.encode('utf-8')
+        yield done_chunk if done_chunk is not None else SSE_DONE_EVENT
 
     async def normal_with_metrics(self, coro: Coroutine[any, any, dict], device: str) -> dict:
         start_time = time.time_ns()
