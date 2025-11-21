@@ -49,6 +49,7 @@ class Scheduler:
         self.waiting : asyncio.Queue = asyncio.Queue()
         self.cpu_running_num: int = 0
         self.gpu_running_num: int = 0
+        self.gpu_scheduled_running_num: int = 0
 
         self._running_tasks: set[asyncio.Task] = set()
 
@@ -90,6 +91,7 @@ class Scheduler:
                     # CPU侧不适合执行prefill任务，当开启auto_pd_offload会自动进行PD解耦
                     task_data["input"]["num_decode_tokens"] = 1
                     decision["device"] = "GPU"
+                    self.gpu_scheduled_running_num += 1
             if decision["device"] == "GPU" and self.gpu_running_num < self.gpu_max_batch:
                 scheduled["GPU"] += 1
                 self.gpu_running_num += 1
@@ -98,7 +100,7 @@ class Scheduler:
                 self._running_tasks.add(task)
                 task.add_done_callback(self._running_tasks.discard)
                 Logger.debug(f"任务分配到GPU执行")
-            elif decision["device"] == "CPU" and self.cpu_running_num < self.cpu_max_batch:              
+            elif decision["device"] == "CPU" and self.cpu_running_num < self.cpu_max_batch:
                 Logger.debug("自动开启CPU侧prefill任务的num_decode_tokens=1以启用部分解码卸载")
                 scheduled["CPU"] += 1
                 self.cpu_running_num += 1
@@ -153,6 +155,8 @@ class Scheduler:
             if device == "GPU":
                 self.gpu_running_num -= 1
                 self.metrics_service.set_gpu_running_num(self.gpu_running_num)
+                if "num_decode_tokens" in request and request["num_decode_tokens"] != 0:
+                    self.gpu_scheduled_running_num -= 1
             elif device == "CPU":
                 self.cpu_running_num -= 1
                 self.metrics_service.set_cpu_running_num(self.cpu_running_num)
@@ -179,27 +183,43 @@ class Scheduler:
         # 是否将任务转移到CPU
         log_msg = ""
         use_cpu = False
-        gpu_decode_throughout_per_batch = self.metrics_service.gpu_decode_throughout / self.metrics_service.gpu_num_running if self.metrics_service.gpu_num_running > 0 else 0
-        cpu_decode_throughout_per_batch = self.metrics_service.cpu_decode_throughout / self.metrics_service.cpu_num_running if self.metrics_service.cpu_num_running > 0 else 0
-        if self.metrics_service.gpu_num_running == 0:
+        gpu_decode_throughout_per_batch = (
+            self.metrics_service.gpu_decode_throughout / self.metrics_service.gpu_running_num
+            if self.metrics_service.gpu_running_num > 0 else 0)
+        cpu_decode_throughout_per_batch = (
+            self.metrics_service.cpu_decode_throughout / self.metrics_service.cpu_running_num
+            if self.metrics_service.cpu_running_num > 0 else 0)
+        if self.gpu_running_num == 0:
             use_cpu = False
-            log_msg = "gpu_num_running为0，优先向GPU发任务"
-        elif self.metrics_service.cpu_num_running == 0:
+            log_msg = "gpu_running_num为0，优先向GPU发任务"
+        elif self.cpu_running_num + self.gpu_scheduled_running_num == 0:
             use_cpu = True
-            log_msg = f"gpu_num_running为{self.metrics_service.gpu_num_running}，cpu_num_running为0，优先向CPU发任务"
-        elif gpu_decode_throughout_per_batch >= cpu_decode_throughout_per_batch:
+            log_msg = f"gpu_running_num为{self.gpu_running_num}，cpu_running_num为0，优先向CPU发任务"
+        elif self.cpu_running_num + self.gpu_scheduled_running_num >= CPU_MAX_BATCH_SIZE:
             use_cpu = False
-            log_msg = f"GPU平均吞吐量{gpu_decode_throughout_per_batch:.2f}tokens/s，高于CPU平均吞吐量{cpu_decode_throughout_per_batch:.2f}tokens/s，优先向GPU发任务"
-        elif self.metrics_service.cpu_num_running > CPU_MAX_BATCH_SIZE:
-            use_cpu = False
-            log_msg = f"CPU运行中请求数{self.metrics_service.cpu_num_running}，超过最大并发量{CPU_MAX_BATCH_SIZE}，优先向GPU发任务"
-        else:
-            use_cpu = True
-            log_msg = f"CPU平均吞吐量{cpu_decode_throughout_per_batch:.2f}tokens/s，高于GPU平均吞吐量{gpu_decode_throughout_per_batch:.2f}tokens/s，优先向CPU发任务"        
-        
+            log_msg = (f"CPU分配的运行中请求数{self.cpu_running_num + self.gpu_scheduled_running_num}，"
+                       f"超过最大并发量{CPU_MAX_BATCH_SIZE}，优先向GPU发任务")
+
+        if log_msg == "":
+            if gpu_decode_throughout_per_batch < 0.1 and cpu_decode_throughout_per_batch < 0.1:
+                if (self.gpu_running_num - self.gpu_scheduled_running_num <
+                    self.cpu_running_num + self.gpu_scheduled_running_num):
+                    use_cpu = False
+                    log_msg = "GPU、CPU暂时无法检测到吞吐量，动态向二者发送请求，本此向GPU发送请求"
+                else:
+                    use_cpu = True
+                    log_msg = "GPU、CPU暂时无法检测到吞吐量，动态向二者发送请求，本此向CPU发送请求"
+            elif gpu_decode_throughout_per_batch >= cpu_decode_throughout_per_batch:
+                use_cpu = False
+                log_msg = (f"GPU平均吞吐量{gpu_decode_throughout_per_batch:.2f}tokens/s，"
+                          f"高于CPU平均吞吐量{cpu_decode_throughout_per_batch:.2f}tokens/s，优先向GPU发任务")
+            else:
+                use_cpu = True
+                log_msg = (f"CPU平均吞吐量{cpu_decode_throughout_per_batch:.2f}tokens/s，"
+                          f"高于GPU平均吞吐量{gpu_decode_throughout_per_batch:.2f}tokens/s，优先向CPU发任务")
+
         decision = {"device": "CPU" if use_cpu else "GPU", "token_limit": 0}
-        Logger.debug(f"\033[1;32m{log_msg}\033[0m")
-        Logger.debug(f"\033[1;32m调度决策: {decision}\033[0m")
+        Logger.debug(f"\033[1;32m{log_msg}, 调度决策: {decision}\033[0m")
         return decision
 
     async def cancel_all_tasks(self):
