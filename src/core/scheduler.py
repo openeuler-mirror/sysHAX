@@ -93,7 +93,7 @@ class Scheduler:
     def has_running_tasks(self) -> bool:
         return self.cpu_running_num > 0 or self.gpu_running_num > 0
 
-    def scheduler(self) -> dict[str, int]:
+    async def scheduler(self) -> dict[str, int]:
         scheduled = {"GPU": 0, "CPU": 0, "skipped": 0}
         while not self.waiting.empty():
             if self.gpu_running_num >= self.gpu_max_batch and \
@@ -228,13 +228,6 @@ class Scheduler:
                 "token_limit": token限制,0表示不限制
             }
         """
-        # 更新系统指标
-        try:
-            self.system_monitor.get_gpu_monitor()
-            self.system_monitor.get_cpu_monitor()
-        except Exception as e:
-            Logger.error(f"更新系统指标失败: {e}", exc_info=True)
-
         CPU_MAX_BATCH_SIZE = self.syshax_config.cpu_max_batch_size
         # 是否将任务转移到CPU
         msg_code = None

@@ -55,7 +55,7 @@ class Engine:
         while self._running:
             try:
                 if self.scheduler.has_unfinshed_tasks():
-                    self.scheduler.scheduler()
+                    await self.scheduler.scheduler()
                 else:
                     await asyncio.sleep(1)  # 避免忙等
             except asyncio.CancelledError:
