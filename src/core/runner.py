@@ -13,7 +13,7 @@ Created: 2025-09-22
 Desc:sysHAX 任务执行模块
 """
 
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 import httpx
 import json
 from collections import deque
@@ -25,12 +25,16 @@ from src.utils.logger import Logger
 
 class Runner:
     def __init__(self, metrics_service: MetricsService, syshax_config: SyshaxConfig) -> None:
-        self.metrics_service: MetricsService = metrics_service
-        self.syshax_config: SyshaxConfig = syshax_config
-        # 拼接 /v1/chat/completions 服务地址
+        self.metrics_service = metrics_service
+        self.syshax_config = syshax_config
+        self._client = httpx.AsyncClient()
         self.v1_chat_gpu = f"http://{syshax_config.gpu_host}:{syshax_config.gpu_port}/v1/chat/completions"
         self.v1_chat_cpu = f"http://{syshax_config.cpu_host}:{syshax_config.cpu_port}/v1/chat/completions"
         self.v1_chat = f"http://{syshax_config.syshax_host}:{syshax_config.syshax_port}/v1/chat/completions"
+
+    async def close(self) -> None:
+        """关闭持久化 HTTP 客户端"""
+        await self._client.aclose()
 
     async def task_handler(self, device: str, data: dict[str, any], resubmit_task_data: dict):
         is_stream = data.get("stream", False)
@@ -59,59 +63,45 @@ class Runner:
             if resubmit_task_data is not None:
                 resubmit_task_data["data"] = await self._create_resubmit_task(data, id)
 
-    async def default_request_stream(
-        self,
-        device: str,
-        data: dict[str, any]
-    ) -> AsyncGenerator[bytes, None]:
+    async def default_request_stream(self, device: str, data: dict[str, any]) -> AsyncGenerator[bytes, None]:
         """执行流式的 decode 请求，输出流式 chunk。"""
         service_url = self.v1_chat_gpu if device == "GPU" else self.v1_chat_cpu
-        async with httpx.AsyncClient() as client:
+        async with self._client.stream(
+            "POST",
+            service_url,
+            headers={"Content-Type": "application/json"},
+            json=data,
+            timeout=self.syshax_config.request_timeout,
+        ) as response:
+            if response.status_code != 200:
+                Logger.error(f"{device} 请求失败: {response.status_code}")
+                yield b'data: {"error": "service_unavailable"}\n\n'
+                return
             try:
-                async with client.stream(
-                        "POST",
-                        service_url,
-                        headers={"Content-Type": "application/json"},
-                        json=data,
-                        timeout=self.syshax_config.request_timeout,
-                    ) as response:
-
-                        if response.status_code != 200:
-                            Logger.error(f"{device} 请求失败: {response.status_code}")
-                            yield b'data: {"error": "service_unavailable"}\n\n'
-                            return
-
-                        async for chunk in response.aiter_bytes():
-                            if chunk:
-                                yield chunk
-            except Exception as e:
-                Logger.error(f"{device} 流式请求异常: {e}", exc_info=True)
-                yield b'data: {"error": "internal_error"}\n\n'
+                async for chunk in response.aiter_bytes():
+                    if chunk:
+                        yield chunk
+            finally:
+                await response.aclose()
 
     async def default_request(self, device: str, data: dict[str, any]) -> dict[str, any]:
         """执行非流式的请求，等待完整响应后返回 JSON 字典。"""
         service_url = self.v1_chat_gpu if device == "GPU" else self.v1_chat_cpu
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.post(
-                    service_url,
-                    headers={"Content-Type": "application/json"},
-                    json=data,
-                    timeout=self.syshax_config.request_timeout,
-                )
-                response.raise_for_status()
-                return response.json()
-            except httpx.HTTPStatusError as e:
-                Logger.error(f"{device} 请求失败: {e.response.status_code}, 响应: {e.response.text}")
-                raise
-            except Exception as e:
-                Logger.error(f"{device} 请求异常: {e}", exc_info=True)
-                raise
+        response = await self._client.post(
+            service_url,
+            headers={"Content-Type": "application/json"},
+            json=data,
+            timeout=self.syshax_config.request_timeout,
+        )
+        try:
+            response.raise_for_status()
+            result = response.json()
+            return result
+        finally:
+            await response.aclose()
 
     def _parse_sse_buffer(self, raw_data: bytes) -> dict | None:
-        """
-        逆向扫描SSE流，定位首个含"finish_reason"字段的事件并解析。
-        """
+        """逆向扫描SSE流，定位首个含"finish_reason"字段的事件并解析。"""
         if not raw_data:
             return None
 
