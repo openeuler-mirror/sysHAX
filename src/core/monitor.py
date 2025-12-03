@@ -14,12 +14,12 @@ Desc:sysHAX 资源监控模块
 """
 
 import re
-from re import Pattern
 import httpx
+from typing import Pattern, Callable, Any
 
-from src.utils.config import CPU_HOST, CPU_PORT, GPU_HOST, GPU_PORT
 from src.utils.logger import Logger
 from src.core.metrics import MetricsService
+from src.utils.config import SyshaxConfig
 
 # Prometheus指标正则匹配模式
 # 资源使用指标
@@ -51,34 +51,36 @@ class ResourceMonitor:
     def __init__(self, metrics_url: str) -> None:
         """初始化资源监控器"""
         self.metrics_url = metrics_url
+        self._client = httpx.AsyncClient()
 
-    def update_metrics(self) -> dict[str, float | int]:
-        """
-        更新指标，只在需要时获取
-        """
-        monitor_data = {
-            "gpu_cache_usage": 0.0,   # GPU KV缓存使用率，百分比
-            "cpu_cache_usage": 0.0,   # CPU KV缓存使用率，百分比
-            "num_running": 0,         # 运行中请求数
-            "num_waiting": 0,         # 等待中请求数
-            "num_swapped": 0,         # 已交换请求数
-        }
+    async def close(self) -> None:
+        """关闭异步 HTTP 客户端"""
+        await self._client.aclose()
+
+    async def update_metrics(self) -> dict[str, float | int]:
+        """异步获取并解析 Prometheus 指标"""
         try:
-            # 发起HTTP请求获取指标
-            with httpx.Client() as client:
-                response = client.get(self.metrics_url, timeout=3.0)
-
-                if response.status_code != httpx.codes.OK:
-                    Logger.warning(f"获取指标失败: HTTP {response.status_code}")
-                    return monitor_data
-
-                monitor_text = response.text
-                monitor_data["gpu_cache_usage"] = self._parse_metrics(monitor_text, RE_GPU_CACHE, float)
-                monitor_data["cpu_cache_usage"] = self._parse_metrics(monitor_text, RE_CPU_CACHE, float)
-                monitor_data["num_running"] = self._parse_metrics(monitor_text, RE_RUNNING_REQS, int)
-                monitor_data["num_waiting"] = self._parse_metrics(monitor_text, RE_WAITING_REQS, int)
-                monitor_data["num_swapped"] = self._parse_metrics(monitor_text, RE_SWAPPED_REQS, int)
+            monitor_data = {
+                "gpu_cache_usage": 0.0,   # GPU KV缓存使用率，百分比
+                "cpu_cache_usage": 0.0,   # CPU KV缓存使用率，百分比
+                "num_running": 0,         # 运行中请求数
+                "num_waiting": 0,         # 等待中请求数
+                "num_swapped": 0,         # 已交换请求数
+            }
+            # 发起异步 HTTP 请求获取指标
+            response = await self._client.get(self.metrics_url, timeout=3.0)
+            if response.status_code != httpx.codes.OK:
+                Logger.warning(f"获取指标失败: HTTP {response.status_code}")
                 return monitor_data
+            monitor_text = response.text
+            await response.aclose()
+            # 解析指标文本
+            monitor_data["gpu_cache_usage"] = self._parse_metrics(monitor_text, RE_GPU_CACHE, float)
+            monitor_data["cpu_cache_usage"] = self._parse_metrics(monitor_text, RE_CPU_CACHE, float)
+            monitor_data["num_running"] = self._parse_metrics(monitor_text, RE_RUNNING_REQS, int)
+            monitor_data["num_waiting"] = self._parse_metrics(monitor_text, RE_WAITING_REQS, int)
+            monitor_data["num_swapped"] = self._parse_metrics(monitor_text, RE_SWAPPED_REQS, int)
+            return monitor_data
         except httpx.TimeoutException as e:
             Logger.warning(f"获取指标超时: {e}")
             return monitor_data
@@ -89,7 +91,7 @@ class ResourceMonitor:
             Logger.error(f"Monitor监控失败: {e}", exc_info=True)
             return monitor_data
 
-    def _parse_metrics(self, metrics_text: str, pattern: Pattern, converter) -> None:
+    def _parse_metrics(self, metrics_text: str, pattern: Pattern, converter: Callable[[str], Any]) -> Any:
         match = pattern.search(metrics_text)
         if match:
             return converter(match.group(1))
@@ -100,18 +102,21 @@ class SystemMonitor:
     系统监控类，同时监控GPU和CPU服务
     """
 
-    def __init__(self, metrics_service: MetricsService) -> None:
+    def __init__(self, metrics_service: MetricsService, syshax_config: SyshaxConfig) -> None:
         """初始化系统监控器：根据配置拼接 metrics URL"""
+        self.config = syshax_config
         # 构建 GPU/CPU metrics URL
-        self.gpu_monitor = ResourceMonitor(f"http://{GPU_HOST}:{GPU_PORT}/metrics")
-        self.cpu_monitor = ResourceMonitor(f"http://{CPU_HOST}:{CPU_PORT}/metrics")
+        self.gpu_monitor = ResourceMonitor(f"http://{syshax_config.gpu_host}:{syshax_config.gpu_port}/metrics")
+        self.cpu_monitor = ResourceMonitor(f"http://{syshax_config.cpu_host}:{syshax_config.cpu_port}/metrics")
         self.metrics_service = metrics_service
 
-    def get_gpu_monitor(self) -> None:
-        monitor_data = self.gpu_monitor.update_metrics()
+    async def get_gpu_monitor(self) -> None:
+        """异步更新并记录 GPU 指标"""
+        monitor_data = await self.gpu_monitor.update_metrics()
         self.metrics_service.set_gpu_cache_usage(monitor_data["gpu_cache_usage"])
 
 
-    def get_cpu_monitor(self) -> None:
-        monitor_data = self.cpu_monitor.update_metrics()
+    async def get_cpu_monitor(self) -> None:
+        """异步更新并记录 CPU 指标"""
+        monitor_data = await self.cpu_monitor.update_metrics()
         self.metrics_service.set_cpu_cache_usage(monitor_data["cpu_cache_usage"])

@@ -13,33 +13,30 @@ Created: 2025-09-22
 Desc:sysHAX 任务执行模块
 """
 
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 import httpx
 import json
 from collections import deque
 import asyncio
 
 from src.core.metrics import MetricsService
-from src.utils.config import (
-    CPU_HOST,
-    CPU_PORT,
-    GPU_HOST,
-    GPU_PORT,
-    SYSHAX_HOST,
-    SYSHAX_PORT,
-    REQUEST_TIMEOUT
-)
+from src.utils.config import SyshaxConfig
 from src.utils.logger import Logger
 
 class Runner:
-    def __init__(self, metrics_service: MetricsService) -> None:
-        self.metrics_service: MetricsService = metrics_service
-        # 拼接 /v1/chat/completions 服务地址
-        self.v1_chat_gpu = f"http://{GPU_HOST}:{GPU_PORT}/v1/chat/completions"
-        self.v1_chat_cpu = f"http://{CPU_HOST}:{CPU_PORT}/v1/chat/completions"
-        self.v1_chat = f"http://{SYSHAX_HOST}:{SYSHAX_PORT}/v1/chat/completions"
+    def __init__(self, metrics_service: MetricsService, syshax_config: SyshaxConfig) -> None:
+        self.metrics_service = metrics_service
+        self.syshax_config = syshax_config
+        self._client = httpx.AsyncClient()
+        self.v1_chat_gpu = f"http://{syshax_config.gpu_host}:{syshax_config.gpu_port}/v1/chat/completions"
+        self.v1_chat_cpu = f"http://{syshax_config.cpu_host}:{syshax_config.cpu_port}/v1/chat/completions"
+        self.v1_chat = f"http://{syshax_config.syshax_host}:{syshax_config.syshax_port}/v1/chat/completions"
 
-    async def task_handler(self, device: str, data: dict[str, any]):
+    async def close(self) -> None:
+        """关闭持久化 HTTP 客户端"""
+        await self._client.aclose()
+
+    async def task_handler(self, device: str, data: dict[str, any], resubmit_task_data: dict):
         is_stream = data.get("stream", False)
         recent_chunks = deque(maxlen=3)
         try:
@@ -63,62 +60,48 @@ class Runner:
             Logger.debug(f"任务{id}未找到包含 finish_reason 的事件")
         elif finish_reason == "scheduled":
             Logger.info(f"任务{id} finish_reason 为 {finish_reason}, 被接续推理")
-            max_tokens = data.get("max_tokens", 512)
-            asyncio.create_task(self._resubmit_to_self(data, id, max_tokens))
+            if resubmit_task_data is not None:
+                resubmit_task_data["data"] = await self._create_resubmit_task(data, id)
 
-    async def default_request_stream(
-        self,
-        device: str,
-        data: dict[str, any]
-    ) -> AsyncGenerator[bytes, None]:
+    async def default_request_stream(self, device: str, data: dict[str, any]) -> AsyncGenerator[bytes, None]:
         """执行流式的 decode 请求，输出流式 chunk。"""
         service_url = self.v1_chat_gpu if device == "GPU" else self.v1_chat_cpu
-        async with httpx.AsyncClient() as client:
+        async with self._client.stream(
+            "POST",
+            service_url,
+            headers={"Content-Type": "application/json"},
+            json=data,
+            timeout=self.syshax_config.request_timeout,
+        ) as response:
+            if response.status_code != 200:
+                Logger.error(f"{device} 请求失败: {response.status_code}")
+                yield b'data: {"error": "service_unavailable"}\n\n'
+                return
             try:
-                async with client.stream(
-                        "POST",
-                        service_url,
-                        headers={"Content-Type": "application/json"},
-                        json=data,
-                        timeout=REQUEST_TIMEOUT,
-                    ) as response:
-
-                        if response.status_code != 200:
-                            Logger.error(f"{device} 请求失败: {response.status_code}")
-                            yield b'data: {"error": "service_unavailable"}\n\n'
-                            return
-
-                        async for chunk in response.aiter_bytes():
-                            if chunk:
-                                yield chunk
-            except Exception as e:
-                Logger.error(f"{device} 流式请求异常: {e}", exc_info=True)
-                yield b'data: {"error": "internal_error"}\n\n'
+                async for chunk in response.aiter_bytes():
+                    if chunk:
+                        yield chunk
+            finally:
+                await response.aclose()
 
     async def default_request(self, device: str, data: dict[str, any]) -> dict[str, any]:
         """执行非流式的请求，等待完整响应后返回 JSON 字典。"""
         service_url = self.v1_chat_gpu if device == "GPU" else self.v1_chat_cpu
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.post(
-                    service_url,
-                    headers={"Content-Type": "application/json"},
-                    json=data,
-                    timeout=REQUEST_TIMEOUT,
-                )
-                response.raise_for_status()
-                return response.json()
-            except httpx.HTTPStatusError as e:
-                Logger.error(f"{device} 请求失败: {e.response.status_code}, 响应: {e.response.text}")
-                raise
-            except Exception as e:
-                Logger.error(f"{device} 请求异常: {e}", exc_info=True)
-                raise
+        response = await self._client.post(
+            service_url,
+            headers={"Content-Type": "application/json"},
+            json=data,
+            timeout=self.syshax_config.request_timeout,
+        )
+        try:
+            response.raise_for_status()
+            result = response.json()
+            return result
+        finally:
+            await response.aclose()
 
     def _parse_sse_buffer(self, raw_data: bytes) -> dict | None:
-        """
-        逆向扫描SSE流，定位首个含"finish_reason"字段的事件并解析。
-        """
+        """逆向扫描SSE流，定位首个含"finish_reason"字段的事件并解析。"""
         if not raw_data:
             return None
 
@@ -156,6 +139,8 @@ class Runner:
             try:
                 if 'finish_reason' in chunk_dict['choices'][0]:
                     finish_reason = chunk_dict.get("choices", [{}])[0].get("finish_reason", None)
+                if 'finish_reason' != 'scheduled' and 'stop_reason' in chunk_dict['choices'][0]:
+                    finish_reason = chunk_dict.get("choices", [{}])[0].get("stop_reason", None)
                 if 'id' in chunk_dict:
                     id = chunk_dict.get("id", None)
                 if id is not None and finish_reason is not None:
@@ -165,25 +150,16 @@ class Runner:
                 continue
         return id, finish_reason
 
-    async def _resubmit_to_self(self, data: dict[str, any], request_id_inference: str, num_decode_tokens: int) -> None:
+    async def _create_resubmit_task(self,
+                                data: dict[str, any],
+                                request_id_inference: str) -> None:
         """
         将任务重新提交给自己执行，适用于 finish_reason == 'scheduled' 的情况
         """
         new_data = data.copy()
         new_data["request_id_inference"] = request_id_inference
-        new_data["num_decode_tokens"] = num_decode_tokens
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.post(
-                    self.v1_chat,
-                    json=new_data,
-                    headers={"Content-Type": "application/json"},
-                    timeout=REQUEST_TIMEOUT,
-                )
-                if response.status_code == 200:
-                    Logger.debug(f"{request_id_inference}接续提交成功")
-                else:
-                    Logger.error(f"{request_id_inference}接续提交失败: {response.status_code}, {response.text}")
-            except Exception as e:
-                Logger.error(f"{request_id_inference}接续提交异常: {e}", exc_info=True)
+        new_data["max_tokens"] = data.get("max_tokens")
+        new_data["num_decode_tokens"] = new_data["max_tokens"]
+        
+        return new_data
 
