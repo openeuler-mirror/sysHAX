@@ -23,7 +23,6 @@ from typing import Any, NoReturn
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from src.utils.config import GPU_HOST, GPU_PORT, REQUEST_TIMEOUT
 from src.utils.logger import Logger
 
 # 创建路由器
@@ -78,7 +77,10 @@ async def completions(request: Request) -> StreamingResponse:
 @router.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
 async def fallback_to_gpu(request: Request, full_path: str) -> Response:
     """Fallback: 未识别接口时转发给 GPU 服务"""
-    url = f"http://{GPU_HOST}:{GPU_PORT}/{full_path}"
+    gpu_host = request.app.state.config.gpu_host
+    gpu_port = request.app.state.config.gpu_port
+    REQUEST_TIMEOUT = request.app.state.config.request_timeout
+    url = f"http://{gpu_host}:{gpu_port}/{full_path}"
     try:
         body = await request.body()
         headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}

@@ -16,14 +16,13 @@ services:
     host: "0.0.0.0"
     port: 7010
 
-models:
-  # 指定使用的模型
-  model_name: "{MODEL_NAME}"
-
 system:
   # 请求超时时间(秒)
   request_timeout: 600
 
 decider:
+  # 是否开启自动PD offload
+  auto_pd_offload: false
+
   # CPU 最大并发量
-  cpu_max_batch_size: 256
+  cpu_max_batch_size: 20
