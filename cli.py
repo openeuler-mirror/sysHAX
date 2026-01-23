@@ -185,13 +185,15 @@ HANDLERS = {
     "request_timeout": _set_request_timeout,
 }
 
-def _handle(cfg: dict[str, Any], key: str, value: str) -> None:
+def _handle(cfg: dict[str, Any], key: str, value: str) -> bool:
     """处理config"""
     handler = HANDLERS.get(key)
     if handler:
         handler(cfg, value)
+        return True
     else:
-        logger.warning("不支持的键：%s", key)
+        logger.error("不支持的键：%s", key)
+        return False
 
 def cmd_config(args: argparse.Namespace) -> None:
     """设置配置项"""
@@ -202,8 +204,10 @@ def cmd_config(args: argparse.Namespace) -> None:
         cmd_init()
     cfg = _load_cfg(cfg_path)
 
-    _handle(cfg, key, value)
-    _write_cfg(cfg_path, cfg, key, value)
+    if _handle(cfg, key, value):
+        _write_cfg(cfg_path, cfg, key, value)
+    else:
+        sys.exit(1)
 
 
 def main() -> None:
