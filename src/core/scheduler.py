@@ -77,7 +77,7 @@ class Scheduler:
 
         self._running_tasks: set[asyncio.Task] = set()
 
-    async def submit_task(self, data: dict[str, Any]) -> None:
+    async def submit_task(self, data: dict[str, Any]) -> asyncio.Queue:
         output_queue = asyncio.Queue()
         task_data = {
             "input": data,
