@@ -76,11 +76,14 @@ async def completions(request: Request) -> StreamingResponse:
 
 @router.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
 async def fallback_to_gpu(request: Request, full_path: str) -> Response:
-    """Fallback: 未识别接口时转发给 GPU 服务"""
-    gpu_host = request.app.state.config.gpu_host
-    gpu_port = request.app.state.config.gpu_port
-    REQUEST_TIMEOUT = request.app.state.config.request_timeout
-    url = f"http://{gpu_host}:{gpu_port}/{full_path}"
+    """Fallback: 未识别接口时转发给 GPU 服务(池内 round-robin 选择实例)"""
+    config = request.app.state.config
+    gpu_workers = config.gpu_workers
+    idx = getattr(request.app.state, "gpu_fallback_idx", 0) % len(gpu_workers)
+    request.app.state.gpu_fallback_idx = idx + 1
+    worker = gpu_workers[idx]
+    REQUEST_TIMEOUT = config.request_timeout
+    url = f"{worker.base_url}/{full_path}"
     try:
         body = await request.body()
         headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}

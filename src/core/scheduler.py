@@ -19,7 +19,7 @@ from typing import Any
 from src.core.monitor import SystemMonitor
 from src.core.runner import Runner
 from src.core.metrics import MetricsService, SSE_DONE_EVENT
-from src.utils.config import SyshaxConfig
+from src.utils.config import SyshaxConfig, Worker
 from src.utils.logger import Logger
 
 SCHEDULE_DICT: dict[int, Any] = {
@@ -68,14 +68,48 @@ class Scheduler:
         self.metrics_service: MetricsService = metrics_service
         self.syshax_config: SyshaxConfig = syshax_config
 
-        self.cpu_max_batch = 256
-        self.gpu_max_batch = 256
+        # 每个实例(worker)允许的最大在途请求数
+        self.per_worker_max_batch = 256
+        self.gpu_workers: list[Worker] = syshax_config.gpu_workers
+        self.cpu_workers: list[Worker] = syshax_config.cpu_workers
         self.waiting : asyncio.Queue = asyncio.Queue()
-        self.cpu_running_num: int = 0
-        self.gpu_running_num: int = 0
+
+        # per-worker 在途请求计数(唯一事实来源)；设备级聚合值由 gpu_running_num/cpu_running_num 属性求和得到
+        self._worker_running: dict[Worker, int] = {
+            worker: 0 for worker in [*self.gpu_workers, *self.cpu_workers]
+        }
+        # least-loaded 打平时用的 round-robin 游标
+        self._rr_cursor: dict[str, int] = {"GPU": 0, "CPU": 0}
         self.gpu_scheduled_running_num: int = 0
 
         self._running_tasks: set[asyncio.Task] = set()
+
+    @property
+    def gpu_running_num(self) -> int:
+        """GPU 池在途请求总数(设备级聚合)"""
+        return sum(self._worker_running[w] for w in self.gpu_workers)
+
+    @property
+    def cpu_running_num(self) -> int:
+        """CPU 池在途请求总数(设备级聚合)"""
+        return sum(self._worker_running[w] for w in self.cpu_workers)
+
+    def _device_workers(self, device: str) -> list[Worker]:
+        return self.gpu_workers if device == "GPU" else self.cpu_workers
+
+    def _device_has_capacity(self, device: str) -> bool:
+        """设备池内是否存在未达到 per_worker_max_batch 的实例"""
+        return any(self._worker_running[w] < self.per_worker_max_batch for w in self._device_workers(device))
+
+    def _select_worker(self, device: str) -> Worker:
+        """在设备池内挑选 least-loaded 的可用实例，负载相同时按 round-robin 打平"""
+        workers = [w for w in self._device_workers(device)
+                   if self._worker_running[w] < self.per_worker_max_batch]
+        min_load = min(self._worker_running[w] for w in workers)
+        candidates = [w for w in workers if self._worker_running[w] == min_load]
+        chosen = candidates[self._rr_cursor[device] % len(candidates)]
+        self._rr_cursor[device] += 1
+        return chosen
 
     async def submit_task(self, data: dict[str, Any]) -> asyncio.Queue:
         output_queue = asyncio.Queue()
@@ -96,8 +130,7 @@ class Scheduler:
     async def scheduler(self) -> dict[str, int]:
         scheduled = {"GPU": 0, "CPU": 0, "skipped": 0}
         while not self.waiting.empty():
-            if self.gpu_running_num >= self.gpu_max_batch and \
-               self.cpu_running_num >= self.cpu_max_batch:
+            if not self._device_has_capacity("GPU") and not self._device_has_capacity("CPU"):
                 break
             try:
                 task_data = self.waiting.get_nowait()
@@ -116,23 +149,27 @@ class Scheduler:
                     task_data["input"]["num_decode_tokens"] = 1
                     decision["device"] = "GPU"
                     self.gpu_scheduled_running_num += 1
-            if decision["device"] == "GPU" and self.gpu_running_num < self.gpu_max_batch:
+
+            device = decision["device"]
+            if device == "GPU" and self._device_has_capacity("GPU"):
+                worker = self._select_worker("GPU")
                 scheduled["GPU"] += 1
-                self.gpu_running_num += 1
+                self._worker_running[worker] += 1
                 self.metrics_service.set_gpu_running_num(self.gpu_running_num)
-                task = asyncio.create_task(self._execute_task(decision["device"], task_data))
+                task = asyncio.create_task(self._execute_task(worker, task_data))
                 self._running_tasks.add(task)
                 task.add_done_callback(self._running_tasks.discard)
-                Logger.debug(f"任务分配到GPU执行")
-            elif decision["device"] == "CPU" and self.cpu_running_num < self.cpu_max_batch:
+                Logger.debug(f"任务分配到 {worker.label} 执行")
+            elif device == "CPU" and self._device_has_capacity("CPU"):
                 Logger.debug("自动开启CPU侧prefill任务的num_decode_tokens=1以启用部分解码卸载")
+                worker = self._select_worker("CPU")
                 scheduled["CPU"] += 1
-                self.cpu_running_num += 1
+                self._worker_running[worker] += 1
                 self.metrics_service.set_cpu_running_num(self.cpu_running_num)
-                task = asyncio.create_task(self._execute_task(decision["device"], task_data))
+                task = asyncio.create_task(self._execute_task(worker, task_data))
                 self._running_tasks.add(task)
                 task.add_done_callback(self._running_tasks.discard)
-                Logger.debug(f"任务分配到CPU执行")
+                Logger.debug(f"任务分配到 {worker.label} 执行")
             else:
                 self.waiting.put_nowait(task_data)
                 scheduled["skipped"] += 1
@@ -142,7 +179,8 @@ class Scheduler:
         self.metrics_service.set_waiting_num(self.waiting.qsize())
         return scheduled
 
-    async def _execute_task(self, device: str, task_data: dict[str, Any]) -> None:
+    async def _execute_task(self, worker: Worker, task_data: dict[str, Any]) -> None:
+        device = worker.device
         request = task_data["input"]
         output_queue = task_data["output_queue"]
         is_stream = request.get("stream", False)
@@ -150,7 +188,7 @@ class Scheduler:
         # 用于传出接续任务
         resubmit_task_data = {"data": None}
         try:
-            async for chunk in self.runner.task_handler(device=device, data=request, resubmit_task_data=resubmit_task_data):
+            async for chunk in self.runner.task_handler(worker=worker, data=request, resubmit_task_data=resubmit_task_data):
                 await output_queue.put(chunk)
 
             if resubmit_task_data["data"] is not None:
@@ -168,7 +206,7 @@ class Scheduler:
                     await output_queue.put(b"[DONE]")
 
         except Exception as e:
-            Logger.error(f"{device}任务执行失败: {e}", exc_info=True)
+            Logger.error(f"{worker.label}任务执行失败: {e}", exc_info=True)
             if is_stream:
                 await output_queue.put(b'data: {"error": "internal_error"}\n\n')
                 await output_queue.put(SSE_DONE_EVENT)
@@ -176,13 +214,12 @@ class Scheduler:
             else:
                 await output_queue.put(b"[DONE]")
         finally:
+            self._worker_running[worker] -= 1
             if device == "GPU":
-                self.gpu_running_num -= 1
                 self.metrics_service.set_gpu_running_num(self.gpu_running_num)
                 if "num_decode_tokens" in request and request["num_decode_tokens"] != 0:
                     self.gpu_scheduled_running_num -= 1
             elif device == "CPU":
-                self.cpu_running_num -= 1
                 self.metrics_service.set_cpu_running_num(self.cpu_running_num)
 
     def _format_schedule_message(self, code: int, **context: Any) -> str:

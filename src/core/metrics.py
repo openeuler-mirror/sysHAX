@@ -16,7 +16,7 @@ Desc:sysHAX 指标管理模块
 import time
 import json
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, Coroutine
 
 from src.utils.logger import Logger
@@ -31,8 +31,11 @@ class MetricsData:
     gpu_decode_throughout: float = 0.0      # 解码吞吐量，tokens/s
     cpu_decode_throughout: float = 0.0      # 解码吞吐量，tokens/s
     total_decode_throughout: float = 0.0    # 总解码吞吐量
-    gpu_cache_usage: float = 0.0    # GPU缓存使用率，百分比
-    cpu_cache_usage: float = 0.0    # CPU缓存使用率，百分比
+    gpu_cache_usage: float = 0.0    # GPU缓存使用率，池内均值(用于展示)
+    cpu_cache_usage: float = 0.0    # CPU缓存使用率，池内均值(用于展示)
+    # 每个实例的缓存使用率，key 为 worker.label(如 "GPU#0")
+    gpu_cache_usage_per_worker: dict[str, float] = field(default_factory=dict)
+    cpu_cache_usage_per_worker: dict[str, float] = field(default_factory=dict)
 
 
 class MetricsService:
@@ -175,6 +178,20 @@ class MetricsService:
 
     def set_cpu_cache_usage(self, usage: float) -> None:
         self.metrics_data.cpu_cache_usage = usage
+
+    @staticmethod
+    def _mean(values: "list[float]") -> float:
+        return sum(values) / len(values) if values else 0.0
+
+    def set_gpu_cache_usage_pool(self, per_worker: dict[str, float]) -> None:
+        """记录 GPU 池每实例缓存使用率，并将聚合均值写入展示字段"""
+        self.metrics_data.gpu_cache_usage_per_worker = per_worker
+        self.metrics_data.gpu_cache_usage = self._mean(list(per_worker.values()))
+
+    def set_cpu_cache_usage_pool(self, per_worker: dict[str, float]) -> None:
+        """记录 CPU 池每实例缓存使用率，并将聚合均值写入展示字段"""
+        self.metrics_data.cpu_cache_usage_per_worker = per_worker
+        self.metrics_data.cpu_cache_usage = self._mean(list(per_worker.values()))
 
     @property
     def gpu_running_num(self) -> int:

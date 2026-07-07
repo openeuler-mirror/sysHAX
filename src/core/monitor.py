@@ -14,12 +14,13 @@ Desc:sysHAX 资源监控模块
 """
 
 import re
+import asyncio
 import httpx
 from typing import Pattern, Callable, Any
 
 from src.utils.logger import Logger
 from src.core.metrics import MetricsService
-from src.utils.config import SyshaxConfig
+from src.utils.config import SyshaxConfig, Worker
 
 # Prometheus指标正则匹配模式
 # 资源使用指标
@@ -99,24 +100,37 @@ class ResourceMonitor:
 
 class SystemMonitor:
     """
-    系统监控类，同时监控GPU和CPU服务
+    系统监控类，同时监控 GPU 与 CPU 的实例池(每个实例一个 ResourceMonitor)
     """
 
     def __init__(self, metrics_service: MetricsService, syshax_config: SyshaxConfig) -> None:
-        """初始化系统监控器：根据配置拼接 metrics URL"""
+        """初始化系统监控器：为每个实例创建一个 ResourceMonitor"""
         self.config = syshax_config
-        # 构建 GPU/CPU metrics URL
-        self.gpu_monitor = ResourceMonitor(f"http://{syshax_config.gpu_host}:{syshax_config.gpu_port}/metrics")
-        self.cpu_monitor = ResourceMonitor(f"http://{syshax_config.cpu_host}:{syshax_config.cpu_port}/metrics")
+        # 每个实例对应一个监控器：[(worker, ResourceMonitor), ...]
+        self.gpu_monitors: list[tuple[Worker, ResourceMonitor]] = [
+            (worker, ResourceMonitor(worker.metrics_url)) for worker in syshax_config.gpu_workers
+        ]
+        self.cpu_monitors: list[tuple[Worker, ResourceMonitor]] = [
+            (worker, ResourceMonitor(worker.metrics_url)) for worker in syshax_config.cpu_workers
+        ]
         self.metrics_service = metrics_service
 
-    async def get_gpu_monitor(self) -> None:
-        """异步更新并记录 GPU 指标"""
-        monitor_data = await self.gpu_monitor.update_metrics()
-        self.metrics_service.set_gpu_cache_usage(monitor_data["gpu_cache_usage"])
+    async def _poll_pool(self, monitors: list[tuple[Worker, ResourceMonitor]], key: str) -> dict[str, float]:
+        """并发轮询一个实例池，返回 {worker.label: 指标值}"""
+        results = await asyncio.gather(*(monitor.update_metrics() for _, monitor in monitors))
+        return {worker.label: data[key] for (worker, _), data in zip(monitors, results)}
 
+    async def get_gpu_monitor(self) -> None:
+        """并发更新 GPU 池各实例指标，聚合后记录"""
+        per_worker = await self._poll_pool(self.gpu_monitors, "gpu_cache_usage")
+        self.metrics_service.set_gpu_cache_usage_pool(per_worker)
 
     async def get_cpu_monitor(self) -> None:
-        """异步更新并记录 CPU 指标"""
-        monitor_data = await self.cpu_monitor.update_metrics()
-        self.metrics_service.set_cpu_cache_usage(monitor_data["cpu_cache_usage"])
+        """并发更新 CPU 池各实例指标，聚合后记录"""
+        per_worker = await self._poll_pool(self.cpu_monitors, "cpu_cache_usage")
+        self.metrics_service.set_cpu_cache_usage_pool(per_worker)
+
+    async def close(self) -> None:
+        """关闭池内所有实例的 HTTP 客户端"""
+        for _, monitor in [*self.gpu_monitors, *self.cpu_monitors]:
+            await monitor.close()
