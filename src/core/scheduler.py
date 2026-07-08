@@ -70,13 +70,20 @@ class Scheduler:
 
         # 每个实例(worker)允许的最大在途请求数
         self.per_worker_max_batch = 256
-        self.gpu_workers: list[Worker] = syshax_config.gpu_workers
-        self.cpu_workers: list[Worker] = syshax_config.cpu_workers
-        self.waiting : asyncio.Queue = asyncio.Queue()
 
-        # per-worker 在途请求计数(唯一事实来源)；设备级聚合值由 gpu_running_num/cpu_running_num 属性求和得到
+        # 全量 workers（含故障节点）
+        self._all_gpu_workers: list[Worker] = syshax_config.gpu_workers
+        self._all_cpu_workers: list[Worker] = syshax_config.cpu_workers
+
+        # 活跃调度池：仅包含健康节点，由 on_worker_down/on_worker_up 动态维护
+        self._active_gpu_workers: set[Worker] = set(self._all_gpu_workers)
+        self._active_cpu_workers: set[Worker] = set(self._all_cpu_workers)
+
+        self.waiting: asyncio.Queue = asyncio.Queue()
+
+        # per-worker 在途请求计数(唯一事实来源)；覆盖全量 workers，防止故障节点在途计数丢失
         self._worker_running: dict[Worker, int] = {
-            worker: 0 for worker in [*self.gpu_workers, *self.cpu_workers]
+            worker: 0 for worker in [*self._all_gpu_workers, *self._all_cpu_workers]
         }
         # least-loaded 打平时用的 round-robin 游标
         self._rr_cursor: dict[str, int] = {"GPU": 0, "CPU": 0}
@@ -85,17 +92,69 @@ class Scheduler:
         self._running_tasks: set[asyncio.Task] = set()
 
     @property
+    def gpu_workers(self) -> list[Worker]:
+        """当前活跃的 GPU Worker 列表（健康节点）"""
+        return list(self._active_gpu_workers)
+
+    @property
+    def cpu_workers(self) -> list[Worker]:
+        """当前活跃的 CPU Worker 列表（健康节点）"""
+        return list(self._active_cpu_workers)
+
+    @property
     def gpu_running_num(self) -> int:
-        """GPU 池在途请求总数(设备级聚合)"""
-        return sum(self._worker_running[w] for w in self.gpu_workers)
+        """GPU 池在途请求总数（含故障节点，防止计数不一致）"""
+        return sum(self._worker_running[w] for w in self._all_gpu_workers)
 
     @property
     def cpu_running_num(self) -> int:
-        """CPU 池在途请求总数(设备级聚合)"""
-        return sum(self._worker_running[w] for w in self.cpu_workers)
+        """CPU 池在途请求总数（含故障节点，防止计数不一致）"""
+        return sum(self._worker_running[w] for w in self._all_cpu_workers)
 
     def _device_workers(self, device: str) -> list[Worker]:
+        """返回当前活跃的设备 Worker 列表（供调度使用）"""
         return self.gpu_workers if device == "GPU" else self.cpu_workers
+
+    def on_worker_down(self, worker: Worker) -> None:
+        """
+        心跳探活回调：节点故障，从活跃调度池摘除。
+        在途任务不受影响，_worker_running 计数正常维护直至任务结束。
+        """
+        removed = False
+        if worker.device == "GPU" and worker in self._active_gpu_workers:
+            self._active_gpu_workers.discard(worker)
+            removed = True
+        elif worker.device == "CPU" and worker in self._active_cpu_workers:
+            self._active_cpu_workers.discard(worker)
+            removed = True
+        if removed:
+            active_gpu = len(self._active_gpu_workers)
+            active_cpu = len(self._active_cpu_workers)
+            Logger.warning(
+                f"[调度池] 节点已摘除: {worker.label}，"
+                f"剩余活跃 GPU={active_gpu}，CPU={active_cpu}"
+            )
+        else:
+            Logger.debug(f"[调度池] on_worker_down 调用但节点不在活跃池中: {worker.label}")
+
+    def on_worker_up(self, worker: Worker) -> None:
+        """
+        心跳探活回调：节点恢复，重新加入活跃调度池。
+        """
+        if worker.device == "GPU" and worker in self._all_gpu_workers:
+            self._active_gpu_workers.add(worker)
+            Logger.info(
+                f"[调度池] 节点重新加入: {worker.label}，"
+                f"当前活跃 GPU={len(self._active_gpu_workers)}，CPU={len(self._active_cpu_workers)}"
+            )
+        elif worker.device == "CPU" and worker in self._all_cpu_workers:
+            self._active_cpu_workers.add(worker)
+            Logger.info(
+                f"[调度池] 节点重新加入: {worker.label}，"
+                f"当前活跃 GPU={len(self._active_gpu_workers)}，CPU={len(self._active_cpu_workers)}"
+            )
+        else:
+            Logger.warning(f"[调度池] on_worker_up 收到未知节点: {worker.label}")
 
     def _device_has_capacity(self, device: str) -> bool:
         """设备池内是否存在未达到 per_worker_max_batch 的实例"""

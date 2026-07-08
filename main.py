@@ -22,6 +22,7 @@ from fastapi import FastAPI
 
 from src import routes
 from src.core.engine import Engine
+from src.core.health_check import HealthChecker
 from src.core.metrics import MetricsService
 from src.core.monitor import SystemMonitor
 from src.core.scheduler import Scheduler
@@ -57,9 +58,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         syshax_config=syshax_config
     )
 
+    # 构建心跳探活器：监控全量 GPU + CPU 节点
+    all_workers = [
+        *syshax_config.gpu_workers,
+        *syshax_config.cpu_workers,
+    ]
+    app.state.health_checker = HealthChecker(
+        workers=all_workers,
+        config=syshax_config,
+        on_worker_down=app.state.scheduler.on_worker_down,
+        on_worker_up=app.state.scheduler.on_worker_up,
+    )
+
     app.state.engine = Engine(
         scheduler=app.state.scheduler,
-        metrics_service=app.state.metrics_service
+        metrics_service=app.state.metrics_service,
+        health_checker=app.state.health_checker,
     )
     app.state.engine.start()
     Logger.info("应用启动完成，API接口已就绪")
