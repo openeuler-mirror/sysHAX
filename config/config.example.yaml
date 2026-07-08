@@ -42,3 +42,66 @@ heartbeat:
   timeout: 3.0
   # 连续失败阈值：连续失败达到此次数后将节点从调度池摘除；节点恢复后自动重新加入
   fail_threshold: 3
+
+# routing:
+  # 请求字段路由规则（可选）。
+  # 规则在现有指标驱动决策之前执行；不配置此块时行为与旧版完全一致。
+  #
+  # 优先级说明：
+  #   接续任务(num_decode_tokens存在) > routing.rules(按priority降序) > 指标决策 > auto_pd_offload
+  #
+  # 支持的条件操作符：
+  #   数值字段(max_tokens/temperature等): gte(大于等于), lte(小于等于), gt(大于), lt(小于), eq(等于)
+  #   字符串字段(model等):                eq(等于), in(包含)
+  #   布尔字段(stream等):                 eq(等于)
+  #   列表字段(messages等，按元素数判断):  min_count(最少包含数量), max_count(最多包含数量)
+  #   字段存在性:                         exists: true/false
+  #
+  # action.device 为软强制：目标设备有容量时采纳，无容量时退回指标决策。
+  # rules:
+    # 示例1：长文本生成走 CPU（decode 阶段 CPU 吞吐更均衡）
+    # - name: "长文本走CPU"
+      # priority: 100
+      # conditions:
+      #   max_tokens:
+      #     gte: 1024
+      # action:
+      #   device: CPU
+
+    # 示例2：短快请求 + 流式 优先打到 GPU
+    # - name: "短流式请求走GPU"
+    #   priority: 90
+    #   conditions:
+    #     max_tokens:
+    #       lte: 128
+    #     stream:
+    #       eq: true
+    #   action:
+    #     device: GPU
+
+    # 示例3：多轮对话（消息轮数 >= 4）走 GPU
+    # - name: "多轮对话走GPU"
+    #   priority: 80
+    #   conditions:
+    #     messages:
+    #       min_count: 4
+    #   action:
+    #     device: GPU
+
+    # 示例4：贪心解码（temperature=0）走 GPU
+    # - name: "贪心解码走GPU"
+    #   priority: 70
+    #   conditions:
+    #     temperature:
+    #       eq: 0
+    #   action:
+    #     device: GPU
+
+    # 示例5：指定模型名称走 CPU
+    # - name: "指定模型走CPU"
+    #   priority: 60
+    #   conditions:
+    #     model:
+    #       in: ["ds-32b-cpu", "qwen-cpu"]
+    #   action:
+    #     device: CPU

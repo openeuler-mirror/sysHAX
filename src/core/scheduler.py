@@ -17,6 +17,7 @@ import time
 import asyncio
 from typing import Any
 from src.core.monitor import SystemMonitor
+from src.core.router import RequestRouter
 from src.core.runner import Runner
 from src.core.metrics import MetricsService, SSE_DONE_EVENT
 from src.utils.config import SyshaxConfig, Worker
@@ -91,6 +92,9 @@ class Scheduler:
 
         self._running_tasks: set[asyncio.Task] = set()
 
+        # 请求字段路由规则引擎（无规则时退回纯指标决策）
+        self._router = RequestRouter(syshax_config.routing_rules)
+
     @property
     def gpu_workers(self) -> list[Worker]:
         """当前活跃的 GPU Worker 列表（健康节点）"""
@@ -156,6 +160,24 @@ class Scheduler:
         else:
             Logger.warning(f"[调度池] on_worker_up 收到未知节点: {worker.label}")
 
+    def _apply_route_hint(self, hint: str) -> dict:
+        """
+        软强制路由建议：目标设备有容量时采纳，否则退回指标层决策。
+
+        Args:
+            hint: 规则建议的设备，"GPU" 或 "CPU"
+
+        Returns:
+            最终决策 dict，格式与 _make_decision() 一致
+        """
+        if self._device_has_capacity(hint):
+            return {"device": hint, "token_limit": 0}
+        # 建议设备无容量，软降级到指标决策
+        Logger.debug(
+            f"[路由规则] 建议设备 {hint} 当前无容量，退回指标层决策"
+        )
+        return self._make_decision()
+
     def _device_has_capacity(self, device: str) -> bool:
         """设备池内是否存在未达到 per_worker_max_batch 的实例"""
         return any(self._worker_running[w] < self.per_worker_max_batch for w in self._device_workers(device))
@@ -196,12 +218,21 @@ class Scheduler:
             except asyncio.QueueEmpty:
                 break
 
-            decision = self._make_decision()
-            # 动态调度当前暂时只能接续调度到CPU侧
+            decision = {"device": "GPU", "token_limit": 0}
+            # ① 接续任务（含 num_decode_tokens）：强制 CPU，跳过规则层
             if "num_decode_tokens" in task_data["input"]:
                 decision["device"] = "CPU"
                 Logger.debug("任务包含num_decode_tokens，强制调度到CPU")
             else:
+                # ② 规则层：按请求字段匹配路由规则
+                route_hint = self._router.match(task_data["input"])
+                if route_hint is not None:
+                    decision = self._apply_route_hint(route_hint)
+                else:
+                    # ③ 指标层：现有吞吐量/负载决策（保持不变）
+                    decision = self._make_decision()
+
+                # ④ auto_pd_offload（现有逻辑不变）
                 if self.syshax_config.auto_pd_offload and decision["device"] == "CPU":
                     # 不含有num_decode_tokens字段，说明是完整任务，首先会进行prefill任务
                     # CPU侧不适合执行prefill任务，当开启auto_pd_offload会自动进行PD解耦
