@@ -17,18 +17,21 @@ import asyncio
 from src.core.metrics import MetricsService
 from src.core.scheduler import Scheduler
 from src.core.monitor import SystemMonitor
+from src.core.health_check import HealthChecker
 from src.utils.logger import Logger
 
 class Engine:
     def __init__(self,
                  scheduler: Scheduler,
-                 metrics_service: MetricsService) -> None:
+                 metrics_service: MetricsService,
+                 health_checker: HealthChecker) -> None:
         self._task: asyncio.Task | None = None
         self._metrics_task: asyncio.Task | None = None
         self._running = False
 
         self.scheduler = scheduler
         self.metrics_service = metrics_service
+        self.health_checker = health_checker
 
     def start(self):
         if self._task and not self._task.done():
@@ -38,11 +41,13 @@ class Engine:
         self._running = True
         self._task = asyncio.create_task(self._engine_loop())
         self._metrics_task = asyncio.create_task(self._metrics_loop())
+        self.health_checker.start()
         Logger.info("Engine started.")
 
     async def stop(self):
         self._running = False
         await self.scheduler.cancel_all_tasks()
+        await self.health_checker.stop()
         if self._task and not self._task.done():
             self._task.cancel()
             try:

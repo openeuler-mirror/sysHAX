@@ -34,3 +34,11 @@ decider:
 
   # CPU 最大并发量
   cpu_max_batch_size: 20
+
+heartbeat:
+  # 探活间隔（秒）：每隔多长时间对每个节点发送一次 /health 探测
+  interval: 10
+  # 单次探活超时（秒）：超过此时间视为本次探活失败
+  timeout: 3.0
+  # 连续失败阈值：连续失败达到此次数后将节点从调度池摘除；节点恢复后自动重新加入
+  fail_threshold: 3
