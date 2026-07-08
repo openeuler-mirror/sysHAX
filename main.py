@@ -68,6 +68,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     finally:
         Logger.info("应用关闭，正在清理资源...")
         await app.state.engine.stop()
+        await app.state.runner.close()
+        await app.state.monitor.close()
 
 # 将 FastAPI 实例化并使用 lifespan 管理生命周期
 app = FastAPI(lifespan=lifespan)

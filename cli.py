@@ -115,28 +115,92 @@ def _write_cfg(path: Path, cfg: dict[str, Any], key: str, value: str) -> None:
         logger.exception("写入配置失败")
         sys.exit(1)
 
-def _set_gpu_host(cfg: dict[str, Any], value: str) -> None:
-    cfg["services"]["gpu"]["host"] = str(value)
+DEVICE_KEYS = ("gpu", "cpu")
 
-def _set_gpu_port(cfg: dict[str, Any], value: str) -> None:
+def _ensure_pool(cfg: dict[str, Any], device: str) -> list[dict[str, Any]]:
+    """确保 services.<device> 为列表形式（兼容旧的单值 dict 写法），并返回该列表"""
+    services = cfg.setdefault("services", {})
+    node = services.get(device)
+    if node is None:
+        services[device] = []
+    elif isinstance(node, dict):
+        services[device] = [node]
+    elif not isinstance(node, list):
+        logger.error("services.%s 配置格式非法，应为映射或列表", device)
+        sys.exit(1)
+    return services[device]
+
+def _parse_host_port(value: str) -> tuple[str, int]:
+    """解析 host:port 形式的值"""
+    host, sep, port = value.rpartition(":")
+    if not sep:
+        logger.error("值必须为 host:port 形式，例如 0.0.0.0:8001")
+        sys.exit(1)
     try:
-        cfg["services"]["gpu"]["port"] = int(value)
+        return host, int(port)
     except ValueError:
-        logger.error("GPU 服务端口必须为整数")
+        logger.error("端口必须为整数：%s", port)
         sys.exit(1)
 
-def _set_cpu_host(cfg: dict[str, Any], value: str) -> None:
-    cfg["services"]["cpu"]["host"] = str(value)
+def _handle_device_key(cfg: dict[str, Any], device: str, rest: str, value: str) -> bool:
+    """处理 gpu/cpu 实例池相关的键。rest 为去掉 'gpu.'/'cpu.' 前缀后的部分。
 
-def _set_cpu_port(cfg: dict[str, Any], value: str) -> None:
-    try:
-        cfg["services"]["cpu"]["port"] = int(value)
-    except ValueError:
-        logger.error("CPU 服务端口必须为整数")
+    支持：
+      host / port              -> 实例 0（向后兼容单实例写法）
+      <idx>.host / <idx>.port  -> 指定下标的实例
+      add   (value=host:port)  -> 追加一个实例
+      remove(value=idx)        -> 删除指定下标的实例
+    """
+    pool = _ensure_pool(cfg, device)
+
+    if rest == "add":
+        host, port = _parse_host_port(value)
+        pool.append({"host": host, "port": port})
+        return True
+    if rest == "remove":
+        try:
+            idx = int(value)
+        except ValueError:
+            logger.error("remove 的值必须为实例下标（整数）")
+            sys.exit(1)
+        if not 0 <= idx < len(pool):
+            logger.error("实例下标越界：%s（当前 %s 池大小 %d）", idx, device, len(pool))
+            sys.exit(1)
+        if len(pool) <= 1:
+            logger.error("%s 池至少需要保留一个实例，无法删除", device)
+            sys.exit(1)
+        pool.pop(idx)
+        return True
+
+    parts = rest.split(".")
+    if len(parts) == 1 and parts[0] in ("host", "port"):
+        idx, field = 0, parts[0]
+    elif len(parts) == 2 and parts[1] in ("host", "port"):
+        try:
+            idx = int(parts[0])
+        except ValueError:
+            return False
+        field = parts[1]
+    else:
+        return False
+
+    if idx >= len(pool):
+        logger.error("实例下标越界：%s（当前 %s 池大小 %d），请先用 %s.add 追加实例",
+                     idx, device, len(pool), device)
         sys.exit(1)
+
+    if field == "host":
+        pool[idx]["host"] = str(value)
+    else:
+        try:
+            pool[idx]["port"] = int(value)
+        except ValueError:
+            logger.error("%s 服务端口必须为整数", device.upper())
+            sys.exit(1)
+    return True
 
 def _set_conductor_host(cfg: dict[str, Any], value: str) -> None:
-    cfg["services"]["conductor"]["host"] = int(value)
+    cfg.setdefault("services", {}).setdefault("conductor", {})["host"] = str(value)
 
 def _set_conductor_port(cfg: dict[str, Any], value: str) -> None:
     try:
@@ -146,9 +210,12 @@ def _set_conductor_port(cfg: dict[str, Any], value: str) -> None:
         sys.exit(1)
 
 def _set_host(cfg: dict[str, Any], value: str) -> None:
-    _set_gpu_host(cfg, value)
-    _set_cpu_host(cfg, value)
-    _set_conductor_host(cfg, value)
+    """同时更新所有 gpu/cpu 实例与 conductor 的 host"""
+    host = str(value)
+    for device in DEVICE_KEYS:
+        for inst in _ensure_pool(cfg, device):
+            inst["host"] = host
+    _set_conductor_host(cfg, host)
 
 def _set_auto_pd_offload(cfg: dict[str, Any], value: str) -> None:
     val_lower = value.lower()
@@ -174,10 +241,6 @@ def _set_request_timeout(cfg: dict[str, Any], value: str) -> None:
 
 HANDLERS = {
     "host": _set_host,
-    "gpu.host": _set_gpu_host,
-    "gpu.port": _set_gpu_port,
-    "cpu.host": _set_cpu_host,
-    "cpu.port": _set_cpu_port,
     "conductor.host": _set_conductor_host,
     "conductor.port": _set_conductor_port,
     "cpu_max_batch_size": _set_cpu_max_batch_size,
@@ -187,13 +250,20 @@ HANDLERS = {
 
 def _handle(cfg: dict[str, Any], key: str, value: str) -> bool:
     """处理config"""
+    # gpu.* / cpu.* 交由实例池处理器（支持下标、add、remove）
+    head, _, rest = key.partition(".")
+    if head in DEVICE_KEYS and rest:
+        if _handle_device_key(cfg, head, rest, value):
+            return True
+        logger.error("不支持的键：%s", key)
+        return False
+
     handler = HANDLERS.get(key)
     if handler:
         handler(cfg, value)
         return True
-    else:
-        logger.error("不支持的键：%s", key)
-        return False
+    logger.error("不支持的键：%s", key)
+    return False
 
 def cmd_config(args: argparse.Namespace) -> None:
     """设置配置项"""
@@ -242,10 +312,14 @@ def main() -> None:
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="""可用 <key> 列表:
             host                                 同时更新所有服务（gpu/cpu/conductor）的 host
-            gpu.host                             GPU 服务 host
-            gpu.port                             GPU 服务 port
-            cpu.host                             CPU 服务 host
-            cpu.port                             CPU 服务 port
+            gpu.host / gpu.port                  GPU 实例 0 的 host / port（向后兼容单实例写法）
+            gpu.<idx>.host / gpu.<idx>.port      指定下标 GPU 实例的 host / port，例如 gpu.1.port
+            gpu.add   <host:port>                向 GPU 池追加一个实例，例如 syshax config gpu.add 0.0.0.0:8003
+            gpu.remove <idx>                     从 GPU 池删除指定下标实例（至少保留一个）
+            cpu.host / cpu.port                  CPU 实例 0 的 host / port
+            cpu.<idx>.host / cpu.<idx>.port      指定下标 CPU 实例的 host / port
+            cpu.add   <host:port>                向 CPU 池追加一个实例
+            cpu.remove <idx>                     从 CPU 池删除指定下标实例（至少保留一个）
             conductor.host                       sysHAX 服务 host
             conductor.port                       sysHAX 服务 port
             auto_pd_offload                      是否开启自动 PD offload（true/false）

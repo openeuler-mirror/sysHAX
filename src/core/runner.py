@@ -20,7 +20,7 @@ from collections import deque
 import asyncio
 
 from src.core.metrics import MetricsService
-from src.utils.config import SyshaxConfig
+from src.utils.config import SyshaxConfig, Worker
 from src.utils.logger import Logger
 
 class Runner:
@@ -28,26 +28,24 @@ class Runner:
         self.metrics_service = metrics_service
         self.syshax_config = syshax_config
         self._client = httpx.AsyncClient()
-        self.v1_chat_gpu = f"http://{syshax_config.gpu_host}:{syshax_config.gpu_port}/v1/chat/completions"
-        self.v1_chat_cpu = f"http://{syshax_config.cpu_host}:{syshax_config.cpu_port}/v1/chat/completions"
-        self.v1_chat = f"http://{syshax_config.syshax_host}:{syshax_config.syshax_port}/v1/chat/completions"
 
     async def close(self) -> None:
         """关闭持久化 HTTP 客户端"""
         await self._client.aclose()
 
-    async def task_handler(self, device: str, data: dict[str, any], resubmit_task_data: dict):
+    async def task_handler(self, worker: Worker, data: dict[str, any], resubmit_task_data: dict):
+        device = worker.device
         is_stream = data.get("stream", False)
         recent_chunks = deque(maxlen=3)
         try:
             if is_stream:
-                gen = self.default_request_stream(device, data)
+                gen = self.default_request_stream(worker, data)
                 async for chunk in self.metrics_service.stream_with_metrics(gen, device=device):
                     recent_chunks.append(chunk)
                     yield chunk
             else:
                 Logger.warning("非流式请求暂时无法实时计算吞吐量，下面的统计数据有误，建议使用流式输出......")
-                coro = self.default_request(device, data)
+                coro = self.default_request(worker, data)
                 result = await self.metrics_service.normal_with_metrics(coro, device=device)
                 json_bytes = json.dumps(result, ensure_ascii=False).encode("utf-8")
                 recent_chunks.append(json_bytes)
@@ -63,9 +61,9 @@ class Runner:
             if resubmit_task_data is not None:
                 resubmit_task_data["data"] = await self._create_resubmit_task(data, id)
 
-    async def default_request_stream(self, device: str, data: dict[str, any]) -> AsyncGenerator[bytes, None]:
+    async def default_request_stream(self, worker: Worker, data: dict[str, any]) -> AsyncGenerator[bytes, None]:
         """执行流式的 decode 请求，输出流式 chunk。"""
-        service_url = self.v1_chat_gpu if device == "GPU" else self.v1_chat_cpu
+        service_url = worker.chat_url
         async with self._client.stream(
             "POST",
             service_url,
@@ -74,7 +72,7 @@ class Runner:
             timeout=self.syshax_config.request_timeout,
         ) as response:
             if response.status_code != 200:
-                Logger.error(f"{device} 请求失败: {response.status_code}")
+                Logger.error(f"{worker.label} 请求失败: {response.status_code}")
                 yield b'data: {"error": "service_unavailable"}\n\n'
                 return
             try:
@@ -84,9 +82,9 @@ class Runner:
             finally:
                 await response.aclose()
 
-    async def default_request(self, device: str, data: dict[str, any]) -> dict[str, any]:
+    async def default_request(self, worker: Worker, data: dict[str, any]) -> dict[str, any]:
         """执行非流式的请求，等待完整响应后返回 JSON 字典。"""
-        service_url = self.v1_chat_gpu if device == "GPU" else self.v1_chat_cpu
+        service_url = worker.chat_url
         response = await self._client.post(
             service_url,
             headers={"Content-Type": "application/json"},

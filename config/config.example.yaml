@@ -3,14 +3,22 @@
 # 或者使用环境变量覆盖这些配置项 (例如: APP_SERVICES_GPU_URL)
 
 services:
+  # GPU / CPU 服务支持两种写法：
+  #   1) 单实例(向后兼容)：直接写 host/port 映射，例如
+  #        gpu:
+  #          host: "0.0.0.0"
+  #          port: 7001
+  #   2) 多实例池：写成列表，sysHAX 会在池内做负载均衡
   gpu:
-    # GPU 服务主机和端口，请替换为实际值
-    host: "0.0.0.0"
-    port: 7001
+    # GPU 服务实例池，请替换为实际值；单实例场景保留一项即可
+    - host: "0.0.0.0"
+      port: 7001
+    # - host: "0.0.0.0"
+    #   port: 7003
   cpu:
-    # CPU 服务主机和端口，请替换为实际值
-    host: "0.0.0.0"
-    port: 7002
+    # CPU 服务实例池，请替换为实际值
+    - host: "0.0.0.0"
+      port: 7002
   conductor:
     # sysHAX服务配置
     host: "0.0.0.0"
