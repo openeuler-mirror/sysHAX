@@ -91,6 +91,9 @@ class SyshaxConfig:
     heartbeat_timeout: float = 3.0     # 单次探活超时（秒）
     heartbeat_fail_threshold: int = 3  # 连续失败多少次后摘除节点
 
+    # 请求字段路由规则（默认为空，即纯指标决策）
+    routing_rules: list["RoutingRule"] = field(default_factory=list)
+
     @property
     def gpu_url(self) -> str:
         """向后兼容：返回第一个 GPU Worker 的 base URL"""
@@ -100,6 +103,78 @@ class SyshaxConfig:
     def cpu_url(self) -> str:
         """向后兼容：返回第一个 CPU Worker 的 base URL"""
         return self.cpu_workers[0].base_url if self.cpu_workers else ""
+
+@dataclass
+class RoutingCondition:
+    """
+    单个路由条件：对请求中的某个字段做列为比较。
+
+    支持的操作符：
+      数値字段   : gte, lte, gt, lt, eq
+      字符串字段 : eq, in
+      布尔字段   : eq
+      列表字段   : min_count, max_count（对元素数进行判断）
+      字段存在性  : exists（value 为 True/False）
+    """
+    field: str      # 请求 JSON 中的字段名
+    operator: str   # 操作符
+    value: Any      # 比较值
+
+
+@dataclass
+class RoutingRule:
+    """
+    路由规则：一组条件（AND）+ 目标设备。
+
+    priority 越大越优先匹配。所有条件均满足时规则命中。
+    action_device 为软强制：目标设备有容量时采纳，无容量时回退到指标决策。
+    """
+    name: str
+    priority: int
+    conditions: list[RoutingCondition]
+    action_device: str   # "GPU" 或 "CPU"
+
+
+def _parse_routing_rules(raw_rules: list[dict]) -> list["RoutingRule"]:
+    """
+    解析 config.yaml 中 routing.rules 列表为 RoutingRule 对象列表。
+
+    YAML 条件格式（每个字段可配置多个操作符）：
+      conditions:
+        max_tokens:
+          gte: 1024
+        stream:
+          eq: true
+    """
+    rules = []
+    for raw in raw_rules:
+        conditions: list[RoutingCondition] = []
+        for field_name, ops in raw.get("conditions", {}).items():
+            if not isinstance(ops, dict):
+                Logger.warning(f"[路由规则] 条件格式无效，跳过: field={field_name}")
+                continue
+            for operator, value in ops.items():
+                conditions.append(RoutingCondition(
+                    field=field_name,
+                    operator=operator,
+                    value=value,
+                ))
+        try:
+            action_device = raw["action"]["device"].upper()
+        except (KeyError, AttributeError):
+            Logger.warning(f"[路由规则] 规则缺少 action.device，跳过: {raw.get('name', 'unnamed')}")
+            continue
+        if action_device not in ("GPU", "CPU"):
+            Logger.warning(f"[路由规则] action.device 仅支持 GPU/CPU，跳过: {action_device}")
+            continue
+        rules.append(RoutingRule(
+            name=raw.get("name", "unnamed"),
+            priority=int(raw.get("priority", 0)),
+            conditions=conditions,
+            action_device=action_device,
+        ))
+    return rules
+
 
 
 def _parse_workers(service_cfg: Any, device: str) -> list[Worker]:
@@ -197,6 +272,12 @@ def load_syshax_config() -> SyshaxConfig:
     heartbeat_timeout = float(hb_cfg.get("timeout", 3.0))
     heartbeat_fail_threshold = int(hb_cfg.get("fail_threshold", 3))
 
+    # 路由规则（延迟解析，缺失则为空列表）
+    raw_routing_rules = raw.get("routing", {}).get("rules", [])
+    routing_rules = _parse_routing_rules(raw_routing_rules)
+    if routing_rules:
+        Logger.info(f"[路由规则] 已加载 {len(routing_rules)} 条规则")
+
     # 构建临时配置以获取 URL（用于动态获取模型名）
     temp_gpu_url = gpu_workers[0].base_url
     temp_cpu_url = cpu_workers[0].base_url
@@ -219,4 +300,5 @@ def load_syshax_config() -> SyshaxConfig:
         heartbeat_interval=heartbeat_interval,
         heartbeat_timeout=heartbeat_timeout,
         heartbeat_fail_threshold=heartbeat_fail_threshold,
+        routing_rules=routing_rules,
     )
