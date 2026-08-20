@@ -1,0 +1,4 @@
+[codespell]
+skip = .git,*.lock,node_modules,.next,coverage,build,dist,vendor,third_party
+# 项目术语/专有名词加入忽略列表；留空会报参数错误，不填就整行删除。
+# ignore-words-list = ba,teh

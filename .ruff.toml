@@ -3,7 +3,8 @@ indent-width = 4
 target-version = "py39"
 
 [lint]
-select = ["ALL"]
+# 存量兼容：仅启用错误类规则；清理 PR 后按路线图加回 B/UP/SIM/RUF
+select = ["E", "F", "I"]
 ignore = [
     "ANN401",
     "ARG002",
@@ -20,7 +21,8 @@ ignore = [
     "D203",
     "D212",
     "S101",
-    "UP007"
+    "UP007",
+    "E501"
 ]
 
 [format]

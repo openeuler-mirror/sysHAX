@@ -1,0 +1,11 @@
+# markdownlint 配置：先放宽适配存量文档，后续按需收紧
+default: true
+MD013:
+  line_length: 400          # 存量长行/表格兼容；清理 PR 后收回 120
+MD060: false                # 存量表格样式混合（对齐/紧凑并存）；清理 PR 统一 aligned 后收回
+MD033: false   # inline HTML
+MD041: false   # 首行必须是一级标题
+MD024: false   # 重复标题
+MD040: false   # 代码块缺语言标签（存量文档常见且不可自动修复；清理 PR 补语言后再收紧）
+MD036: false   # 存量文档用强调冒充标题（如 **Tips**）；清理 PR 改为标题
+MD001: false   # 存量标题跳级；清理 PR 修正标题层级
